@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   FlatList,
   Keyboard,
+  Image,
+  Dimensions,
 } from "react-native";
 import "react-native-get-random-values";
 import { useContext, useState, useRef } from "react";
@@ -20,6 +22,14 @@ import * as Clipboard from "expo-clipboard";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import Markdown from "@ronradtke/react-native-markdown-display";
 
+type Message = {
+  user?: string;
+  assistant?: string;
+  image?: string;
+};
+
+const { width } = Dimensions.get("window");
+
 export function Chat() {
   const [loading, setLoading] = useState<boolean>(false);
   const [input, setInput] = useState<string>("");
@@ -27,8 +37,11 @@ export function Chat() {
   const { showActionSheetWithOptions } = useActionSheet();
 
   const [geminiAPIMessages, setGeminiAPIMessages] = useState("");
-  const [geminiResponse, setGeminiResponse] = useState({
-    messages: [] as Array<{ user: string; assistant?: string }>,
+  const [geminiResponse, setGeminiResponse] = useState<{
+    messages: Message[];
+    index: string;
+  }>({
+    messages: [],
     index: uuid(),
   });
 
@@ -38,105 +51,195 @@ export function Chat() {
   async function chat() {
     if (!input || loading) return;
     Keyboard.dismiss();
-    generateGeminiResponse();
+
+    const currentInput = input;
+    setInput("");
+
+    await generateGeminiResponse(currentInput);
   }
 
-  async function generateGeminiResponse() {
-    if (!input) return;
-    Keyboard.dismiss();
+  async function generateGeminiResponse(currentInput: string) {
     let localResponse = "";
-
+    
     let geminiArray = [
       ...geminiResponse.messages,
-      {
-        user: input,
-      },
-    ] as [{ user: string; assistant?: string }];
+      { user: currentInput },
+      { assistant: "" }
+    ];
+
+    setLoading(true);
 
     setGeminiResponse((c) => ({
       index: c.index,
       messages: JSON.parse(JSON.stringify(geminiArray)),
     }));
-
-    setLoading(true);
     setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({
-        animated: true,
-      });
+      scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 1);
-    const currentInput = input;
-    setInput("");
 
-    const eventSourceArgs = {
-      body: {
-        prompt: currentInput,
-        model: 'gemini',
-      },
-      type: 'gemini',
-    };
+    try {
+      const es = await getEventSource({
+        body: {
+          prompt: currentInput,
+          messages: geminiResponse.messages,
+          model: 'gemini',
+        },
+        type: 'gemini',
+      });
 
-    const es = await getEventSource(eventSourceArgs);
+      const listener = (event: any) => {
+        if (event.type === "open") {
+          console.log("Open SSE connection.");
+        } else if (event.type === "message") {
+          if (event.data !== "[DONE]") {
+            if (localResponse.length < 850) {
+              scrollViewRef.current?.scrollToEnd({
+                animated: false,
+              });
+            }
+            const rawData = event.data;
+            try {
+              const parsedData = JSON.parse(rawData);
 
-    const listener = (event) => {
-      if (event.type === "open") {
-        console.log("Open SSE connection.");
-      } else if (event.type === "message") {
-        if (event.data !== "[DONE]") {
-          if (localResponse.length < 850) {
-            scrollViewRef.current?.scrollToEnd({
-              animated: true,
-            });
+              if (typeof parsedData === 'object' && parsedData !== null && parsedData.image && typeof parsedData.image === 'string') {
+                  geminiArray = [
+                      ...geminiArray,
+                      { assistant: "", image: parsedData.image }
+                  ];
+                  setGeminiResponse(c => ({
+                      index: c.index,
+                      messages: JSON.parse(JSON.stringify(geminiArray))
+                  }));
+                  setTimeout(() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }, 50);
+
+              } else if (typeof parsedData === 'string') {
+                localResponse = localResponse + parsedData;
+                if (geminiArray.length > 0) {
+                    geminiArray[geminiArray.length - 1].assistant = localResponse;
+                }
+                setGeminiResponse((c) => ({
+                  index: c.index,
+                  messages: JSON.parse(JSON.stringify(geminiArray)),
+                }));
+              } else {
+                 console.warn("Received unexpected SSE data format:", parsedData);
+              }
+
+            } catch (parseError) {
+              console.error("Error parsing SSE data:", parseError, "Data:", rawData);
+              if (geminiArray.length > 0) {
+                 geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + "⚠️ Error processing response stream.";
+              }
+              setGeminiResponse((c) => ({
+                index: c.index,
+                messages: JSON.parse(JSON.stringify(geminiArray)),
+              }));
+              setLoading(false);
+              es.close();
+            }
+          } else {
+            setLoading(false);
+            es.close();
+            setTimeout(() => {
+              scrollViewRef.current?.scrollToEnd({ animated: true });
+            }, 50);
           }
-          const data = event.data;
-          localResponse = localResponse + JSON.parse(data);
-          geminiArray[geminiArray.length - 1].assistant = localResponse;
+        } else if (event.type === "error") {
+          console.error("Connection error:", event.message);
+          if (geminiArray.length > 0) {
+            geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + `⚠️ Connection error: ${event.message}`;
+          }
           setGeminiResponse((c) => ({
             index: c.index,
             messages: JSON.parse(JSON.stringify(geminiArray)),
           }));
-        } else {
           setLoading(false);
-          setGeminiAPIMessages(
-            `${geminiAPIMessages}\n\nPrompt: ${currentInput}\n\nResponse:${localResponse}`
-          );
+          es.close();
+        } else if (event.type === "exception") {
+          console.error("Error:", event.message, event.error);
+          if (geminiArray.length > 0) {
+            geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + `⚠️ Server exception: ${event.message}`;
+          }
+          setGeminiResponse((c) => ({
+            index: c.index,
+            messages: JSON.parse(JSON.stringify(geminiArray)),
+          }));
+          setLoading(false);
           es.close();
         }
-      } else if (event.type === "error") {
-        console.error("Connection error:", event.message);
-        setLoading(false);
-        es.close();
-      } else if (event.type === "exception") {
-        console.error("Error:", event.message, event.error);
-        setLoading(false);
-        es.close();
-      }
-    };
+      };
 
-    es.addEventListener("open", listener);
-    es.addEventListener("message", listener);
-    es.addEventListener("error", listener);
+      es.addEventListener("open", listener);
+      es.addEventListener("message", listener);
+      es.addEventListener("error", listener);
+    } catch (error) {
+      console.error("Failed to get event source:", error);
+      geminiArray[geminiArray.length - 1].assistant = "⚠️ Failed to connect to the chat service.";
+      setGeminiResponse((c) => ({
+        index: c.index,
+        messages: JSON.parse(JSON.stringify(geminiArray)),
+      }));
+      setLoading(false);
+    }
   }
 
   async function copyToClipboard(text: string) {
     await Clipboard.setStringAsync(text);
   }
 
-  async function showClipboardActionsheet(text: string) {
-    const cancelButtonIndex = 2;
+  async function showClipboardActionsheet(text: string, image?: string) {
+    const options: string[] = [];
+    if (text) {
+      options.push("Copy Text");
+    }
+    if (image) {
+      options.push("Save Image");
+    }
+    options.push("Clear Chat");
+    options.push("Cancel");
+
+    const cancelButtonIndex = options.length - 1;
+    const destructiveButtonIndex = options.indexOf("Clear Chat");
+
     showActionSheetWithOptions(
       {
-        options: ["Copy to clipboard", "Clear chat", "cancel"],
+        options,
         cancelButtonIndex,
+        destructiveButtonIndex,
       },
-      (selectedIndex) => {
-        if (selectedIndex === Number(0)) {
-          copyToClipboard(text);
+      async (selectedIndex?: number) => {
+        if (selectedIndex === undefined || selectedIndex === cancelButtonIndex) {
+          return;
         }
-        if (selectedIndex === 1) {
+
+        const selectedOption = options[selectedIndex];
+
+        if (selectedOption === "Copy Text") {
+          copyToClipboard(text);
+        } else if (selectedOption === "Save Image") {
+          console.log("Saving image...");
+          await downloadImageToDevice(image!);
+        } else if (selectedOption === "Clear Chat") {
           clearChat();
         }
       }
     );
+  }
+
+  async function downloadImageToDevice(url: string) {
+    try {
+      const FileSystem = require('expo-file-system');
+      const fileUri = FileSystem.documentDirectory + uuid() + ".png";
+      console.log(`Downloading to: ${fileUri}`);
+      const { uri } = await FileSystem.downloadAsync(url, fileUri);
+      console.log("Finished downloading to ", uri);
+      alert("Image saved to app files.");
+    } catch (e) {
+      console.error("Error downloading image:", e);
+      alert("Failed to download image.");
+    }
   }
 
   async function clearChat() {
@@ -146,30 +249,46 @@ export function Chat() {
     setInput("");
   }
 
-  function renderItem({ item }: { item: any }) {
-    return (
-      <View>
-        {item.user && (
+  function renderItem({ item }: { item: Message }) {
+    if (item.user) {
+      return (
+        <View style={styles.userMessageOuterWrapper}>
           <View style={styles.userMessageContainer}>
-            <Pressable
-              onLongPress={() => showClipboardActionsheet(item.user)}
-              style={({ pressed }) => [
-                styles.userMessage,
-              ]}
-            >
-              <Text style={styles.messageText}>{item.user}</Text>
-            </Pressable>
+            <View style={styles.userMessageWrapper}>
+              <Text style={styles.userMessageText}>
+                {item.user}
+              </Text>
+            </View>
           </View>
-        )}
-        {item.assistant && (
+        </View>
+      );
+    }
+    
+    else if (item.assistant || item.image) {
+      return (
+        <Pressable
+          onLongPress={() => showClipboardActionsheet(item.assistant || '', item.image)}
+          style={styles.responseContainerPressable}
+        >
           <View style={styles.responseContainer}>
-            <Markdown style={styles.markdownStyle}>
-              {item.assistant}
-            </Markdown>
+            {item.assistant?.trim() && (
+              <Markdown style={styles.markdownStyle}>
+                {item.assistant}
+              </Markdown>
+            )}
+            {item.image && (
+              <Image
+                source={{ uri: item.image }}
+                style={styles.imageStyle}
+                resizeMode="contain"
+              />
+            )}
           </View>
-        )}
-      </View>
-    );
+        </Pressable>
+      );
+    }
+
+    return null;
   }
 
   return (
@@ -184,6 +303,7 @@ export function Chat() {
           style={styles.scrollContainer}>
           {geminiResponse.messages.length === 0 && (
             <View style={styles.greetingContainer}>
+              <Text style={styles.greeting}>Send a message to start chatting!</Text>
             </View>
           )}
           <FlatList
@@ -310,17 +430,22 @@ const getStyles = (theme: any) => {
   };
 
   const styles = StyleSheet.create({
+    userMessageOuterWrapper: {
+      marginTop: 10,
+    },
     greetingContainer: {
       justifyContent: "center",
       alignItems: "center",
       flexGrow: 1,
       paddingBottom: 90,
+      paddingHorizontal: 20,
     },
     greeting: {
-      fontSize: 24,
-      fontFamily: theme.boldFont,
+      fontSize: 20,
+      textAlign: 'center',
+      fontFamily: theme.regularFont,
       color: theme.textColor,
-      opacity: 0.8,
+      opacity: 0.6,
     },
     loadingContainer: {
       marginVertical: 25,
@@ -328,36 +453,38 @@ const getStyles = (theme: any) => {
       flexDirection: "row",
       alignItems: "center",
     },
+    responseContainerPressable: {
+      alignSelf: 'flex-start',
+      maxWidth: "85%",
+      marginLeft: 10,
+    },
     responseContainer: {
       padding: 15,
       backgroundColor: theme.responseBackgroundColor,
-      marginRight: 50,
       borderBottomLeftRadius: 0,
       borderTopLeftRadius: 10,
       borderTopRightRadius: 10,
       borderBottomRightRadius: 10,
       marginTop: 10,
       marginBottom: 10,
-      marginLeft: 10,
-      maxWidth: "85%",
     },
     userMessageContainer: {
-      alignItems: "flex-end",
-      marginRight: 10,
-      marginBottom: 5,
-      marginTop: 10,
+      alignItems: 'flex-end',
+      marginRight: 15,
+      marginLeft: 24,
     },
-    userMessage: {
+    userMessageWrapper: {
+      maxWidth: '85%',
       borderRadius: 8,
       borderTopRightRadius: 0,
       backgroundColor: theme.tintColor,
-      paddingVertical: 5,
-      paddingHorizontal: 9,
     },
-    messageText: {
-      color: theme.tintTextColor || theme.white,
+    userMessageText: {
+      color: theme.tintTextColor,
       fontFamily: theme.regularFont,
       fontSize: 16,
+      paddingVertical: 5,
+      paddingHorizontal: 9,
     },
     container: {
       flex: 1,
@@ -402,6 +529,14 @@ const getStyles = (theme: any) => {
     buttonDisabled: {
       backgroundColor: theme.disabledColor || "#cccccc",
       opacity: 0.7,
+    },
+    imageStyle: {
+      width: width * 0.7,
+      height: width * 0.7,
+      marginTop: 10,
+      borderRadius: 8,
+      backgroundColor: theme.borderColor || "#e0e0e0",
+      alignSelf: 'center',
     },
   });
 
