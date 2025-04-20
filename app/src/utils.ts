@@ -1,6 +1,5 @@
 import { DOMAIN } from '../constants'
 import EventSource from 'react-native-sse'
-import { Model } from '../types'
 
 export function getEventSource({
   headers,
@@ -23,68 +22,31 @@ export function getEventSource({
   return es;
 }
 
-export function getFirstNCharsOrLess(text:string, numChars:number = 1000) {
-  if (text.length <= numChars) {
-    return text;
-  }
-  return text.substring(0, numChars);
-}
-
-export function getFirstN({ messages, size = 10 } : { size?: number, messages: any[] }) {
-  if (messages.length > size) {
-    const firstN = new Array()
-    for(let i = 0; i < size; i++) {
-      firstN.push(messages[i])
-    }
-    return firstN
-  } else {
-    return messages
-  }
-}
-
-export function getChatType(type: Model) {
-  if (type.label.includes('gpt')) {
-    return 'gpt'
-  }
-  if (type.label.includes('cohere')) {
-    return 'cohere'
-  }
-  if (type.label.includes('mistral')) {
-    return 'mistral'
-  }
-  if (type.label.includes('gemini')) {
-    return 'gemini'
-  }
-  else return 'claude'
-}
 /**
- * Calls the backend image endpoint for text-based or config-based generation.
- * @param payload - Object containing model, prompt, and potentially other JSON data like baseImage.
+ * Calls the backend image endpoint for text-based generation.
+ * @param payload - Object containing model and prompt.
  * @returns Promise resolving to an object like { image: "url" }
  */
 export const callImageGenerationEndpoint = async (
     payload: {
-        model: string; // e.g., 'flux-pro', 'stableDiffusionXL'
+        model: string; 
         prompt: string;
-        baseImage?: string; // Optional: For models like illusion diffusion
-        aspect_ratio?: string; // Optional: For models like flux-pro
-        // Add any other parameters your server might expect in the JSON body
     }
 ): Promise<{ image: string }> => {
   try {
     console.log(`[callImageGenerationEndpoint] Calling backend for model: ${payload.model}`);
 
-    const endpointPath = '/images/fal'; // Matches the path used in images.tsx
+    const endpointPath = '/images/fal'; 
     const fullUrl = `${DOMAIN}${endpointPath}`;
     console.log(`[callImageGenerationEndpoint] Fetching: ${fullUrl}`);
-    console.log(`[callImageGenerationEndpoint] Payload:`, payload); // Log the data being sent
+    console.log(`[callImageGenerationEndpoint] Payload:`, payload);
 
     const response = await fetch(fullUrl, {
       method: "POST",
       headers: {
-        'Content-Type': 'application/json' // Sending JSON data
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(payload) // Send the whole payload object
+      body: JSON.stringify(payload)
     });
 
     const responseText = await response.text();
@@ -109,12 +71,11 @@ export const callImageGenerationEndpoint = async (
     }
 
     console.log(`[callImageGenerationEndpoint] Success, received image URL: ${data.image}`);
-    return data; // Return { image: "url" }
+    return data;
 
   } catch (error) {
     console.error('[callImageGenerationEndpoint] Error during image generation call:', error);
-    throw error; // Re-throw
+    throw error;
   }
 };
-// --- END ADD FUNCTION ---
 

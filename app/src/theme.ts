@@ -29,6 +29,7 @@ const lightTheme = {
   backgroundColor: colors.white,
   placeholderTextColor: colors.gray,
   secondaryBackgroundColor: colors.black,
+  responseBackgroundColor: '#f0f0f0',
   borderColor: 'rgba(0, 0, 0, .15)',
   tintColor: '#0281ff',
   tintTextColor: colors.white,
@@ -45,8 +46,8 @@ const darkTheme = {
   mutedForegroundColor: colors.lightWhite,
   backgroundColor: colors.black,
   placeholderTextColor: colors.lightWhite,
-  laceholderTextColor: colors.lightWhite,
   secondaryBackgroundColor: colors.white,
+  responseBackgroundColor: '#222222',
   borderColor: 'rgba(255, 255, 255, .2)',
   tintColor: '#0281ff',
   tintTextColor: colors.white,
@@ -60,6 +61,7 @@ const hackerNews = {
   label: 'hackerNews',
   backgroundColor: '#e4e4e4',
   tintColor: '#ed702d',
+  responseBackgroundColor: '#dcdcdc',
 }
 
 const miami = {
@@ -69,7 +71,8 @@ const miami = {
   backgroundColor: '#231F20',
   tintColor: colors.lightPink,
   tintTextColor: '#231F20',
-  tabBarActiveTintColor: colors.lightPink
+  tabBarActiveTintColor: colors.lightPink,
+  responseBackgroundColor: '#333333',
 }
 
 const vercel = {
@@ -81,6 +84,7 @@ const vercel = {
   tintTextColor: colors.white,
   tabBarActiveTintColor: colors.white,
   secondaryTextColor: colors.white,
+  responseBackgroundColor: '#111111',
 }
 
 export {
