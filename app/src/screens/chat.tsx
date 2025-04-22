@@ -11,9 +11,15 @@ import {
   Keyboard,
   Image,
   Dimensions,
+  Modal,
+  Button,
+  ViewStyle,
+  TextStyle,
+  ImageStyle,
+  DimensionValue
 } from "react-native";
 import "react-native-get-random-values";
-import { useContext, useState, useRef } from "react";
+import { useContext, useState, useRef, useEffect, useMemo } from "react";
 import { ThemeContext } from "../context";
 import { getEventSource } from "../utils";
 import { v4 as uuid } from "uuid";
@@ -21,22 +27,250 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Clipboard from "expo-clipboard";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import Markdown from "@ronradtke/react-native-markdown-display";
+import { ITheme } from '../../types';
 
 type Message = {
   user?: string;
   assistant?: string;
   image?: string;
+  _id?: string;
 };
 
 const { width } = Dimensions.get("window");
 
+// Define possible stages for the preference/chat flow
+type PreferenceStage = 'idle' | 'requesting' | 'userName' | 'partnerSex' | 'partnerLooks' | 'partnerTraits' | 'userInterests' | 'generating' | 'chatting' | 'error';
+
+// Define styles type
+interface ChatStyles {
+  container: ViewStyle;
+  userMessageOuterWrapper: ViewStyle;
+  greetingContainer: ViewStyle;
+  greeting: TextStyle;
+  userMessageContainer: ViewStyle;
+  userMessageWrapper: ViewStyle;
+  userMessageText: TextStyle;
+  responseContainerPressable: ViewStyle;
+  responseContainer: ViewStyle;
+  imageStyle: ImageStyle;
+  scrollContainer: ViewStyle;
+  chatInputContainer: ViewStyle;
+  input: TextStyle;
+  buttonStyle: ViewStyle;
+  imageButtonStyle: ViewStyle;
+  buttonDisabled: ViewStyle;
+  buttonPressed: ViewStyle;
+  loadingContainer: ViewStyle;
+  generatingContainer: ViewStyle;
+  generatingText: TextStyle;
+}
+
+// Define return type for getStyles function
+interface StylesResult {
+  sheet: ChatStyles;
+  markdown: any;
+}
+
+// --- getStyles defined OUTSIDE the component ---
+const getStyles = (theme: ITheme): StylesResult => {
+  if (!theme || typeof theme !== 'object' || !theme.backgroundColor) {
+    console.error("[getStyles] Invalid or incomplete theme object received:", theme);
+    // Return an empty object but with the right type
+    return { 
+      sheet: {} as ChatStyles, 
+      markdown: {} 
+    }; 
+  }
+
+  console.log("[getStyles] Theme properties before StyleSheet.create:", {
+    textColor: theme.textColor,
+    regularFont: theme.regularFont,
+    tintColor: theme.tintColor,
+    tintTextColor: theme.tintTextColor,
+    backgroundColor: theme.backgroundColor,
+    responseBackgroundColor: theme.responseBackgroundColor,
+    borderColor: theme.borderColor,
+    disabledColor: theme.disabledColor,
+  });
+
+  const markdownStyle = {
+    body: { color: theme.textColor, fontSize: 16, fontFamily: theme.regularFont },
+    heading1: { color: theme.textColor, fontFamily: theme.boldFont, fontSize: 24, marginTop: 10, marginBottom: 5 },
+    heading2: { color: theme.textColor, fontFamily: theme.semiBoldFont, fontSize: 20, marginTop: 8, marginBottom: 4 },
+    heading3: { color: theme.textColor, fontFamily: theme.semiBoldFont, fontSize: 18, marginTop: 6, marginBottom: 3 },
+    code_block: { backgroundColor: theme.secondaryBackgroundColor, color: theme.secondaryTextColor, padding: 10, borderRadius: 4, borderColor: theme.borderColor, borderWidth: 1, fontFamily: "Courier New", marginVertical: 5 },
+    fence: { backgroundColor: theme.secondaryBackgroundColor, color: theme.secondaryTextColor, padding: 10, borderRadius: 4, borderColor: theme.borderColor, borderWidth: 1, fontFamily: "Courier New", marginVertical: 5 },
+    link: { color: theme.tintColor, textDecorationLine: "underline" as const },
+    list_item: { marginBottom: 5 },
+    bullet_list: { marginLeft: 10 },
+    ordered_list: { marginLeft: 10 },
+    blockquote: { backgroundColor: theme.borderColor, borderLeftColor: theme.tintColor, borderLeftWidth: 4, padding: 10, marginLeft: 5, marginVertical: 5 },
+    strong: { fontFamily: theme.boldFont },
+    em: { fontStyle: 'italic' as const },
+  };
+
+  try {
+    console.log("[getStyles] Attempting StyleSheet.create (full)... ");
+    const styles = StyleSheet.create<ChatStyles>({
+      container: {
+        flex: 1,
+        backgroundColor: theme.backgroundColor,
+      },
+      userMessageOuterWrapper: {
+         marginTop: 10,
+         alignItems: 'flex-end',
+       },
+      greetingContainer: {
+         justifyContent: "center",
+         alignItems: "center",
+         flexGrow: 1,
+         paddingVertical: 50,
+         paddingHorizontal: 20,
+       },
+      greeting: {
+        fontSize: 20,
+        color: theme.textColor,
+        fontFamily: theme.regularFont,
+        textAlign: 'center',
+      },
+      userMessageContainer: {
+        alignSelf: "flex-end",
+        marginHorizontal: 10,
+        marginBottom: 5,
+        maxWidth: "80%",
+      },
+      userMessageWrapper: {
+        backgroundColor: theme.tintColor,
+        padding: 10,
+        borderRadius: 15,
+        borderBottomRightRadius: 0,
+      },
+      userMessageText: {
+        color: theme.tintTextColor,
+        fontSize: 16,
+        fontFamily: theme.regularFont,
+      },
+      responseContainerPressable: {
+        alignSelf: 'flex-start',
+        maxWidth: "90%",
+        marginHorizontal: 10,
+        marginBottom: 5,
+      },
+      responseContainer: {
+        backgroundColor: theme.responseBackgroundColor || '#f0f0f0',
+        padding: 10,
+        borderRadius: 15,
+        borderBottomLeftRadius: 0,
+        alignSelf: 'flex-start',
+      },
+      imageStyle: {
+        maxWidth: '100%',
+        aspectRatio: 1,
+        borderRadius: 10,
+        alignSelf: 'center',
+      },
+      scrollContainer: {
+        flex: 1,
+      },
+      chatInputContainer: {
+        flexDirection: "row",
+        padding: 10,
+        borderTopWidth: 1,
+        borderTopColor: theme.borderColor,
+        alignItems: "center",
+        backgroundColor: theme.backgroundColor,
+      },
+      input: {
+        flex: 1,
+        padding: 10,
+        marginRight: 10,
+        borderWidth: 1,
+        borderColor: theme.borderColor,
+        borderRadius: 20,
+        color: theme.textColor,
+        backgroundColor: theme.inputBackgroundColor || theme.backgroundColor,
+      },
+      buttonStyle: {
+        backgroundColor: theme.tintColor,
+        padding: 10,
+        borderRadius: 50,
+        justifyContent: "center",
+        alignItems: "center",
+        marginLeft: 5,
+      },
+      imageButtonStyle: {
+        backgroundColor: theme.tintColor,
+        padding: 10,
+        borderRadius: 50,
+        justifyContent: "center",
+        alignItems: "center",
+      },
+      buttonDisabled: {
+        backgroundColor: "#cccccc",
+        opacity: 0.6,
+      },
+      buttonPressed: {
+        opacity: 0.8,
+      },
+      loadingContainer: {
+         paddingVertical: 10,
+         alignItems: 'center',
+       },
+      generatingContainer: {
+         flexDirection: 'row',
+         alignItems: 'center',
+         justifyContent: 'center',
+         paddingVertical: 10,
+         borderBottomWidth: 1,
+         borderBottomColor: theme.borderColor,
+         backgroundColor: theme.backgroundColor,
+       },
+      generatingText: {
+         color: theme.textColor,
+         fontFamily: theme.regularFont,
+         fontSize: 14,
+       },
+    });
+    console.log("[getStyles] StyleSheet.create (full) succeeded.");
+    return { sheet: styles, markdown: markdownStyle };
+  } catch (error) {
+    console.error("[getStyles] Error during StyleSheet.create:", error);
+    return { sheet: {} as ChatStyles, markdown: markdownStyle }; 
+  }
+};
+// --- End of getStyles --- 
+
+// --- ADDED: Default style fallback ---
+const defaultImageStyle: ImageStyle = { 
+  width: width * 0.5, // 50% of screen width (smaller than before)
+  height: width * 0.5, // Square aspect ratio
+  borderRadius: 10, 
+  alignSelf: 'center' 
+};
+
+// --- ADDED: Debug function ---
+const logImageError = (error: any, imageUrl: string) => {
+  console.error(`Image loading error for ${imageUrl}:`, error.nativeEvent);
+};
+
 export function Chat() {
+  console.log("--- Chat component function started ---");
   const [loading, setLoading] = useState<boolean>(false);
   const [input, setInput] = useState<string>("");
   const scrollViewRef = useRef<ScrollView | null>(null);
   const { showActionSheetWithOptions } = useActionSheet();
 
-  const [geminiAPIMessages, setGeminiAPIMessages] = useState("");
+  // New state for sequential preference flow
+  const [preferenceStage, setPreferenceStage] = useState<PreferenceStage>('idle');
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(null);
+
+  // --- ADDED: State for image modal ---
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // --- ADDED: State to help force FlatList updates ---
+  const [listUpdateToken, setListUpdateToken] = useState(0);
+
   const [geminiResponse, setGeminiResponse] = useState<{
     messages: Message[];
     index: string;
@@ -46,148 +280,479 @@ export function Chat() {
   });
 
   const { theme } = useContext(ThemeContext);
-  const styles = getStyles(theme);
 
-  async function chat() {
-    if (!input || loading) return;
+  // --- ADDED: useEffect to trigger preference flow on mount ---
+  useEffect(() => {
+    // Only run if messages are empty and we are in the initial idle state
+    if (geminiResponse.messages.length === 0 && preferenceStage === 'idle') {
+      console.log("[useEffect] No messages, triggering preference flow initiation.");
+      // Set loading/requesting state immediately
+      setPreferenceStage('requesting'); 
+      setLoading(true);
+      // Call the server to get the first question
+      // Use an empty body as per Route 1 logic
+      streamGeminiResponse({ messages: [] }, 'gemini'); 
+    }
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // --- Defensive Check --- 
+  // Ensure theme is valid before calling getStyles
+  if (!theme || !theme.backgroundColor) {
+     console.log("[Chat] Theme context not yet valid, rendering loading state.");
+     return (
+       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+         <ActivityIndicator />
+       </View>
+     );
+   }
+  // --- End Defensive Check ---
+
+  // --- Call getStyles directly AFTER check --- 
+  console.log("[Chat] Theme is valid, calling getStyles.");
+  const { sheet, markdown } = getStyles(theme);
+  
+  // --- Check if styles were created successfully --- 
+  if (!sheet || Object.keys(sheet).length === 0) {
+    console.error("[Chat] getStyles returned empty sheet, rendering error/loading state.");
+    // This might indicate the error happened inside getStyles despite the check
+    return (
+       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+         <Text>Error loading styles</Text>
+       </View>
+    );
+  }
+  // --- End Style Check ---
+
+  async function handleSendMessage() {
+    if (!input.trim() || loading) return;
     Keyboard.dismiss();
 
     const currentInput = input;
     setInput("");
 
-    await generateGeminiResponse(currentInput);
+    let requestBody: any = {};
+    let endpointType = 'gemini';
+    let optimisticMessages: Message[] = [];
+
+    if (geminiResponse.messages.length === 0 && preferenceStage === 'idle') {
+        console.log("[handleSendMessage] First message, initiating preference flow.");
+        requestBody = { messages: [] };
+        setPreferenceStage('requesting');
+        setLoading(true);
+        optimisticMessages = [];
+    }
+    else if (currentQuestionId && currentInput) {
+      console.log(`[handleSendMessage] Sending answer for ${currentQuestionId}: ${currentInput.substring(0, 30)}...`);
+      
+      optimisticMessages = [
+        ...geminiResponse.messages,
+        { user: currentInput },
+      ];
+      setGeminiResponse(c => ({ ...c, messages: JSON.parse(JSON.stringify(optimisticMessages)) }));
+      setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 1);
+
+      requestBody = {
+        messages: optimisticMessages,
+        answer: currentInput,
+        questionId: currentQuestionId
+      };
+      setLoading(true);
+    } 
+    else if (preferenceStage === 'chatting' || preferenceStage === 'idle' || preferenceStage === 'error') {
+      console.log(`[handleSendMessage] Sending regular chat prompt: ${currentInput}`);
+      console.log(`[handleSendMessage] Current message count: ${geminiResponse.messages.length}`);
+      
+      // Enhanced image request detection - more natural phrases
+      const imageRequestPhrases = [
+        /\b(show|send|get|display|pic|picture|photo|image|generate|see|view|selfie|look)/i,
+        /\bwhat (do|would|will) you look like\b/i,
+        /\bhow do you look\b/i,
+        /\blet me see\b/i,
+        /\bsee you\b/i,
+        /\b(want|like) to see\b/i,
+        /\bshow me (a|your|how)\b/i,
+        /\b(how|what) (would|do|does) (.*) look\b/i
+      ];
+      
+      // Check if any of the image request patterns match
+      const isImageRequest = imageRequestPhrases.some(pattern => pattern.test(currentInput.toLowerCase())) && 
+                            !/no (pic|picture|photo|image|selfie)/i.test(currentInput.toLowerCase());
+      
+      let enhancedInput = currentInput;
+      if (isImageRequest) {
+        // Add the explicit image generation tag for the server to detect
+        console.log("[handleSendMessage] Detected natural image request, enhancing prompt");
+        enhancedInput = `${currentInput} \`\`[generate_image: ${currentInput}]\`\``;
+        console.log("[handleSendMessage] Enhanced image prompt:", enhancedInput);
+      }
+      
+      // Create a copy of the user's message to add to the chat
+      const newUserMessage = { 
+        user: currentInput,  // Keep the original input for display
+        _id: uuid() 
+      };
+      
+      // Add only the user message to the state (server will return the assistant's response)
+      optimisticMessages = [
+        ...geminiResponse.messages,
+        newUserMessage
+      ];
+      
+      // Log the messages we're setting
+      console.log(`[handleSendMessage] Setting ${optimisticMessages.length} messages`);
+      optimisticMessages.forEach((msg, idx) => {
+        if (msg.user) console.log(`[handleSendMessage] Message ${idx}: USER: ${msg.user.substring(0, 20)}...`);
+        if (msg.assistant) console.log(`[handleSendMessage] Message ${idx}: ASSISTANT: ${msg.assistant.substring(0, 20)}...`);
+        if (msg.image) console.log(`[handleSendMessage] Message ${idx}: IMAGE: ${msg.image}`);
+      });
+      
+      // Update the state with the optimistic user message
+      setGeminiResponse((c) => ({ 
+          index: c.index,
+          messages: JSON.parse(JSON.stringify(optimisticMessages)),
+      }));
+      
+      // Sometimes we need to force a re-render
+      setListUpdateToken(prev => prev + 1);
+      
+      // Scroll to the new message
+      setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
+
+      // Prepare the request body with the full conversation history
+      // But use the enhanced input with the image tag hint
+      requestBody = {
+        prompt: enhancedInput,
+        messages: geminiResponse.messages,
+        // Flag to tell the server this might be an image request
+        is_potential_image_request: isImageRequest,
+      };
+      setLoading(true);
+    } else {
+        console.warn(`[handleSendMessage] Message ignored, preference stage is '${preferenceStage}'`);
+        setInput(currentInput);
+        return;
+    }
+    
+    await streamGeminiResponse(requestBody, endpointType);
   }
 
-  async function generateGeminiResponse(currentInput: string) {
-    let localResponse = "";
-    
-    let geminiArray = [
-      ...geminiResponse.messages,
-      { user: currentInput },
-      { assistant: "" }
-    ];
-
-    setLoading(true);
-
-    setGeminiResponse((c) => ({
-      index: c.index,
-      messages: JSON.parse(JSON.stringify(geminiArray)),
-    }));
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 1);
+  async function streamGeminiResponse(requestBody: any, endpointType: string) {
+    let localResponseAccumulator = "";
+    let currentAssistantMessageId: string | null = null;
 
     try {
+      if (Object.keys(requestBody).length === 0 && requestBody.constructor === Object && geminiResponse.messages.length > 0) {
+           console.warn("[streamGeminiResponse] Request body is empty but messages exist, aborting SSE connection attempt.");
+           setLoading(false);
+           return;
+       }
+
+      console.log("[streamGeminiResponse] Connecting to SSE with body:", requestBody);
       const es = await getEventSource({
-        body: {
-          prompt: currentInput,
-          messages: geminiResponse.messages,
-          model: 'gemini',
-        },
-        type: 'gemini',
+        body: requestBody,
+        type: endpointType,
       });
 
       const listener = (event: any) => {
         if (event.type === "open") {
-          console.log("Open SSE connection.");
+          console.log("[SSE] Open connection.");
         } else if (event.type === "message") {
-          if (event.data !== "[DONE]") {
-            if (localResponse.length < 850) {
-              scrollViewRef.current?.scrollToEnd({
-                animated: false,
-              });
-            }
-            const rawData = event.data;
-            try {
-              const parsedData = JSON.parse(rawData);
+          if (event.data === "[DONE]") {
+             console.log("[SSE] DONE received.");
+             setLoading(false);
+             setPreferenceStage(prevStage => {
+                 console.log(`[SSE DONE] Current stage: ${prevStage}`);
+                 if (prevStage === 'generating') {
+                     console.log("[SSE DONE] Switching stage from generating to chatting.");
+                     return 'chatting';
+                 }
+                 return prevStage; 
+             });
+ 
+             localResponseAccumulator = "";
+             currentAssistantMessageId = null;
+             es.close();
+             setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
+             return;
+          }
 
-              if (typeof parsedData === 'object' && parsedData !== null && parsedData.image && typeof parsedData.image === 'string') {
-                  geminiArray = [
-                      ...geminiArray,
-                      { assistant: "", image: parsedData.image }
-                  ];
-                  setGeminiResponse(c => ({
-                      index: c.index,
-                      messages: JSON.parse(JSON.stringify(geminiArray))
-                  }));
-                  setTimeout(() => {
-                    scrollViewRef.current?.scrollToEnd({ animated: true });
-                  }, 50);
+          let parsedData;
+          try {
+            parsedData = JSON.parse(event.data);
+          } catch (parseError) {
+            console.error("Error parsing SSE data:", parseError, "Raw Data:", event.data);
+            parsedData = event.data; 
+          }
 
-              } else if (typeof parsedData === 'string') {
-                localResponse = localResponse + parsedData;
-                if (geminiArray.length > 0) {
-                    geminiArray[geminiArray.length - 1].assistant = localResponse;
+          if (typeof parsedData === 'object' && parsedData !== null) {
+             if (parsedData.action === "ask_preference" && parsedData.question && parsedData.questionId) {
+                console.log(`[SSE] Received question: ${parsedData.questionId}`);
+                
+                // Check if this is a duplicate of the very first question
+                const isFirstQuestion = parsedData.questionId === "userName";
+                const alreadyHasFirstQuestion = geminiResponse.messages.length > 0 && 
+                    geminiResponse.messages[0].assistant && 
+                    geminiResponse.messages[0].assistant.includes("First, what's your name?");
+                
+                // Only skip if it's the first question AND we already have it
+                const shouldSkip = isFirstQuestion && alreadyHasFirstQuestion;
+                
+                if (!shouldSkip) {
+                    console.log(`[SSE] Adding preference question: ${parsedData.questionId}`);
+                    setGeminiResponse(prevState => ({
+                        ...prevState,
+                        messages: [...prevState.messages, { assistant: parsedData.question, _id: uuid() }] 
+                    }));
+                } else {
+                    console.log(`[SSE] Skipping duplicate first question`);
                 }
-                setGeminiResponse((c) => ({
-                  index: c.index,
-                  messages: JSON.parse(JSON.stringify(geminiArray)),
-                }));
-              } else {
-                 console.warn("Received unexpected SSE data format:", parsedData);
+                
+                setCurrentQuestionId(parsedData.questionId);
+                setPreferenceStage(parsedData.questionId as PreferenceStage);
+                setLoading(false);
+                es.close();
+                setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
+             } else if (parsedData.action === "generating_flirt") {
+                 console.log("[SSE] Received generating_flirt action.");
+                 const newMessageId = uuid();
+                 
+                 // Don't skip adding the generating message - it's needed for UI feedback
+                 setGeminiResponse(prevState => ({
+                    ...prevState,
+                    messages: [...prevState.messages, { assistant: "", _id: newMessageId }] 
+                 }));
+                 currentAssistantMessageId = newMessageId;
+                 
+                 setPreferenceStage('generating');
+             } else if (parsedData.error) {
+                 console.error("[SSE] Received error object:", parsedData.error);
+                 const errorText = `⚠️ Server Error: ${parsedData.error}`;
+                 setGeminiResponse(prevState => {
+                     const messagesCopy = JSON.parse(JSON.stringify(prevState.messages));
+                     if (messagesCopy.length > 0 && messagesCopy[messagesCopy.length - 1]?.assistant !== undefined) {
+                         messagesCopy[messagesCopy.length - 1].assistant += `\n${errorText}`;
+                     } else {
+                         messagesCopy.push({ assistant: errorText });
+                     }
+                     return { ...prevState, messages: messagesCopy };
+                 });
+                 setLoading(false);
+                 setPreferenceStage('error');
+                 es.close();
+             } else if (parsedData.final_update === true) {
+                 console.log("[SSE] Received final_update instruction:", parsedData);
+                 const finalText = parsedData.text || ""; // Get final text (includes potential error)
+                 
+                 // Always log the final text for debugging
+                 console.log("[SSE Final Update] Final text:", finalText.substring(0, 100) + "...");
+
+                 // Pattern to look for empty backticks that might indicate an attempted image 
+                 // The model sometimes tries to use `` or ``` as image placeholders
+                 const containsEmptyBackticks = /(?:``|```)\s*(?:``|```)/g.test(finalText);
+                 const mentionsImage = /\b(?:picture|image|photo|look|see|here)\b/i.test(finalText);
+                 
+                 // Is this likely an incomplete image response?
+                 const likelyImageAttempt = (containsEmptyBackticks && mentionsImage) || 
+                                          requestBody.is_potential_image_request === true;
+                 
+                 if (likelyImageAttempt) {
+                     console.log("[SSE Final Update] Response contains empty backticks, likely intended for image");
+                     
+                     // Suggest triggering image generation if relevant
+                     const imageHint = "\n\n(If you were expecting an image, please try asking with the phrase 'show me a picture' or 'generate an image')";
+                     console.log("[SSE Final Update] Adding image hint");
+                     
+                     // Add a hint to the final text
+                     // Only if this wasn't already an explicit image request with the right hint
+                     if (!requestBody.is_potential_image_request) {
+                         localResponseAccumulator = finalText + imageHint;
+                     } else {
+                         localResponseAccumulator = finalText;
+                     }
+                 } else {
+                     localResponseAccumulator = finalText; // Update local accumulator with final text
+                 }
+
+                 // Check for image generation tags in the text (may be hidden in the response)
+                 const containsImageTag = /\[\s*generate_image\s*:\s*([^\]]+)\]/i.test(finalText);
+                 console.log("[SSE Final Update] Contains image tag:", containsImageTag);
+
+                 setGeminiResponse(prevState => {
+                     const messagesCopy = JSON.parse(JSON.stringify(prevState.messages));
+                     
+                     // Is this a chat message or part of the preference/introduction flow?
+                     const isRegularChatMessage = prevState.messages.length > 0 && 
+                                               prevState.messages[prevState.messages.length - 1].user !== undefined;
+                     
+                     console.log("[SSE Final Update] Is regular chat message:", isRegularChatMessage);
+                     
+                     // If this is the very first message in an empty chat, it's likely the introduction
+                     const isFirstIntro = prevState.messages.length === 0;
+                     console.log("[SSE Final Update] Is first intro:", isFirstIntro);
+                     
+                     if (isRegularChatMessage) {
+                         // For chat responses to user messages, add a new assistant message
+                         const newAssistantMessage = {
+                             assistant: localResponseAccumulator,
+                             _id: uuid()
+                         };
+                         messagesCopy.push(newAssistantMessage);
+                         console.log("[SSE Final Update] Added new assistant response message");
+                     } else if (messagesCopy.length > 0) {
+                         // For preference flow or intro, update the last message
+                         const lastMessageIndex = messagesCopy.length - 1;
+                         
+                         // Only update if the last message is from the assistant
+                         if (messagesCopy[lastMessageIndex].assistant !== undefined) {
+                             messagesCopy[lastMessageIndex] = {
+                                ...messagesCopy[lastMessageIndex],
+                                assistant: localResponseAccumulator,
+                                image: null // Ensure image is null or removed
+                             };
+                             console.log("[SSE Final Update] Updated last assistant message TEXT");
+                         } else {
+                             // If last message is not from assistant, add a new one
+                             messagesCopy.push({
+                                 assistant: localResponseAccumulator,
+                                 _id: uuid()
+                             });
+                             console.log("[SSE Final Update] Last message not from assistant, added new one");
+                         }
+                     } else if (isFirstIntro) {
+                         console.log("[SSE Final Update] Adding first intro message");
+                         messagesCopy.push({ 
+                             assistant: localResponseAccumulator,
+                             _id: uuid()
+                         });
+                     } else {
+                         console.warn("[SSE Final Update] Messages array was empty, adding new text message.");
+                         messagesCopy.push({ assistant: localResponseAccumulator });
+                     }
+                     
+                     console.log("[SSE Final Update] Messages count after update:", messagesCopy.length);
+                     return { ...prevState, messages: messagesCopy };
+                 });
+
+                 // Increment update token to ensure re-render after text update
+                 setListUpdateToken(t => t + 1); 
+                 // Scroll to end after text update
+                 setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: false }); }, 50);
+
+             // --- Handler for the new separate image message ---
+             } else if (parsedData.new_image_message === true && parsedData.image) {
+                 console.log("[SSE] Received new_image_message instruction:", parsedData);
+                 const imageUrl = parsedData.image;
+                 const newImageMsg = { image: imageUrl, _id: uuid() };
+
+                 setGeminiResponse(prevState => ({
+                     ...prevState,
+                     messages: [...prevState.messages, newImageMsg]
+                 }));
+
+                 console.log("[SSE New Image] Added new image message:", newImageMsg);
+                 
+                 // Force a render update
+                 setListUpdateToken(t => t + 1);
+             } else {
+                 console.warn("[SSE] Received unexpected object structure:", parsedData);
+             }
+          } else if (typeof parsedData === 'string') {
+              console.log("[SSE Text] Text chunk received, setting stage to 'chatting'.");
+              setPreferenceStage('chatting'); 
+
+              localResponseAccumulator += parsedData;
+              if (localResponseAccumulator.length < 850) {
+                 scrollViewRef.current?.scrollToEnd({ animated: false });
               }
 
-            } catch (parseError) {
-              console.error("Error parsing SSE data:", parseError, "Data:", rawData);
-              if (geminiArray.length > 0) {
-                 geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + "⚠️ Error processing response stream.";
-              }
-              setGeminiResponse((c) => ({
-                index: c.index,
-                messages: JSON.parse(JSON.stringify(geminiArray)),
-              }));
-              setLoading(false);
-              es.close();
-            }
+              // Check if this is a response to a user message
+              const isUserMessageResponse = geminiResponse.messages.length > 0 && 
+                                         geminiResponse.messages[geminiResponse.messages.length - 1].user !== undefined;
+              
+              setGeminiResponse(prevState => {
+                   const messagesCopy = JSON.parse(JSON.stringify(prevState.messages));
+                   
+                   if (isUserMessageResponse) {
+                       // For responses to user messages, add a new message
+                       if (messagesCopy.length > 0 && 
+                          messagesCopy[messagesCopy.length - 1].assistant === "") {
+                           // Update the placeholder message if it exists
+                           messagesCopy[messagesCopy.length - 1].assistant = localResponseAccumulator;
+                       } else {
+                           // Otherwise, add a new assistant message
+                           messagesCopy.push({ 
+                              assistant: localResponseAccumulator, 
+                              _id: uuid() 
+                           });
+                       }
+                   }
+                   else if (messagesCopy.length > 0) {
+                       // For other cases (like intro), update the last message
+                       const lastMessageIndex = messagesCopy.length - 1;
+                       messagesCopy[lastMessageIndex] = { 
+                          ...messagesCopy[lastMessageIndex],
+                          assistant: localResponseAccumulator
+                       };
+                   } else {
+                       console.warn("[SSE Text] Messages array was empty, adding new message with text.");
+                       messagesCopy.push({ assistant: localResponseAccumulator });
+                   }
+                   return { ...prevState, messages: messagesCopy };
+              });
           } else {
-            setLoading(false);
-            es.close();
-            setTimeout(() => {
-              scrollViewRef.current?.scrollToEnd({ animated: true });
-            }, 50);
+             console.warn("[SSE] Received unexpected data type:", typeof parsedData, event.data);
           }
+
         } else if (event.type === "error") {
-          console.error("Connection error:", event.message);
-          if (geminiArray.length > 0) {
-            geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + `⚠️ Connection error: ${event.message}`;
-          }
-          setGeminiResponse((c) => ({
-            index: c.index,
-            messages: JSON.parse(JSON.stringify(geminiArray)),
-          }));
-          setLoading(false);
-          es.close();
-        } else if (event.type === "exception") {
-          console.error("Error:", event.message, event.error);
-          if (geminiArray.length > 0) {
-            geminiArray[geminiArray.length - 1].assistant = (geminiArray[geminiArray.length - 1].assistant || "") + `⚠️ Server exception: ${event.message}`;
-          }
-          setGeminiResponse((c) => ({
-            index: c.index,
-            messages: JSON.parse(JSON.stringify(geminiArray)),
-          }));
-          setLoading(false);
-          es.close();
+          console.error("SSE Connection error:", event.message || event);
+           const errorText = `⚠️ Connection Error. Please check your network or restart the chat.`;
+           setGeminiResponse(prevState => {
+               const messagesCopy = JSON.parse(JSON.stringify(prevState.messages));
+               if (messagesCopy.length > 0 && messagesCopy[messagesCopy.length - 1]?.assistant !== undefined) {
+                   messagesCopy[messagesCopy.length - 1].assistant = (messagesCopy[messagesCopy.length - 1].assistant || "") + `
+${errorText}`;
+               } else {
+                   messagesCopy.push({ assistant: errorText });
+               }
+               return { ...prevState, messages: messagesCopy };
+           });
+           setLoading(false);
+           setPreferenceStage('error');
+           es.close();
         }
       };
 
       es.addEventListener("open", listener);
       es.addEventListener("message", listener);
       es.addEventListener("error", listener);
+
     } catch (error) {
       console.error("Failed to get event source:", error);
-      geminiArray[geminiArray.length - 1].assistant = "⚠️ Failed to connect to the chat service.";
-      setGeminiResponse((c) => ({
-        index: c.index,
-        messages: JSON.parse(JSON.stringify(geminiArray)),
-      }));
+      const errorMsg = "⚠️ Failed to connect to the chat service.";
+       setGeminiResponse(prevState => {
+           const messagesCopy = JSON.parse(JSON.stringify(prevState.messages));
+            if (messagesCopy.length > 0 && messagesCopy[messagesCopy.length - 1]?.assistant !== undefined) {
+               messagesCopy[messagesCopy.length - 1].assistant = (messagesCopy[messagesCopy.length - 1].assistant || "") + `
+${errorMsg}`;
+            } else {
+               messagesCopy.push({ assistant: errorMsg });
+            }
+           return { ...prevState, messages: messagesCopy };
+       });
       setLoading(false);
+      setPreferenceStage('error');
     }
   }
 
   async function copyToClipboard(text: string) {
     await Clipboard.setStringAsync(text);
   }
+
+  // Function to handle image tapping
+  const handleImageTap = (imageUrl: string) => {
+    setSelectedImage(imageUrl);
+    setModalVisible(true);
+  };
 
   async function showClipboardActionsheet(text: string, image?: string) {
     const options: string[] = [];
@@ -219,8 +784,12 @@ export function Chat() {
         if (selectedOption === "Copy Text") {
           copyToClipboard(text);
         } else if (selectedOption === "Save Image") {
-          console.log("Saving image...");
-          await downloadImageToDevice(image!);
+          console.log("Save Image action selected.");
+          if (image) {
+            await downloadImageToDevice(image);
+          } else {
+            alert("No image to save.");
+          }
         } else if (selectedOption === "Clear Chat") {
           clearChat();
         }
@@ -231,31 +800,41 @@ export function Chat() {
   async function downloadImageToDevice(url: string) {
     try {
       const FileSystem = require('expo-file-system');
-      const fileUri = FileSystem.documentDirectory + uuid() + ".png";
-      console.log(`Downloading to: ${fileUri}`);
+      const fileUri = FileSystem.documentDirectory + uuid() + ".jpg";
+      console.log(`Downloading image from ${url} to: ${fileUri}`);
       const { uri } = await FileSystem.downloadAsync(url, fileUri);
       console.log("Finished downloading to ", uri);
+
       alert("Image saved to app files.");
     } catch (e) {
-      console.error("Error downloading image:", e);
+      console.error("Error downloading/saving image:", e);
       alert("Failed to download image.");
     }
   }
 
   async function clearChat() {
     if (loading) return;
+    console.log("Clearing chat...");
     setGeminiResponse({ messages: [], index: uuid() });
-    setGeminiAPIMessages("");
     setInput("");
+    setCurrentQuestionId(null);
+    setPreferenceStage('idle');
   }
 
-  function renderItem({ item }: { item: Message }) {
+  function renderItem({ item, index }: { item: Message, index: number }) {
+    // Debug message content
+    console.log(`[renderItem] Rendering item #${index}:`, 
+                item.user ? `USER: ${item.user.substring(0, 20)}...` : 
+                item.assistant ? `ASSISTANT: ${item.assistant.substring(0, 20)}...` : 
+                item.image ? `IMAGE: ${item.image.substring(0, 30)}...` : 'EMPTY');
+    
+    // Render USER message
     if (item.user) {
       return (
-        <View style={styles.userMessageOuterWrapper}>
-          <View style={styles.userMessageContainer}>
-            <View style={styles.userMessageWrapper}>
-              <Text style={styles.userMessageText}>
+        <View style={sheet.userMessageOuterWrapper}>
+          <View style={sheet.userMessageContainer}>
+            <View style={sheet.userMessageWrapper}>
+              <Text style={sheet.userMessageText}>
                 {item.user}
               </Text>
             </View>
@@ -264,281 +843,247 @@ export function Chat() {
       );
     }
     
-    else if (item.assistant || item.image) {
+    // Render ASSISTANT message (text or image)
+    else if (item.assistant !== undefined || item.image) { 
+      const hasText = item.assistant && item.assistant.trim().length > 0;
+      const hasImage = !!item.image;
+
+      if (!hasText && !hasImage && preferenceStage !== 'generating') { 
+          console.warn(`[renderItem] Item #${index} has no content to display and not in generating stage`);
+          return null;
+      }
+
+      // --- Handle image-only message separately --- 
+      if (!hasText && hasImage) {
+        console.log(`[renderItem] Rendering image-only message #${index}. Image URL:`, item.image);
+        return (
+          <View style={{ 
+            alignSelf: 'flex-start', 
+            marginHorizontal: 10, 
+            marginVertical: 8,
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.1)',
+            backgroundColor: '#111', 
+            borderRadius: 12,
+            padding: 4,
+            overflow: 'hidden'
+          }}> 
+            <Pressable onPress={() => handleImageTap(item.image || '')}>
+              <Image
+                source={{ uri: item.image }}
+                style={defaultImageStyle}
+                resizeMode="cover"
+                onError={(e) => logImageError(e, item.image || 'unknown')}
+                testID="image-message"
+              />
+            </Pressable>
+          </View>
+        );
+      }
+      
+      // --- Render text message (possibly with image) --- 
+      console.log(`[renderItem] Rendering text message #${index}${hasImage ? ' with image' : ''}`);
       return (
         <Pressable
           onLongPress={() => showClipboardActionsheet(item.assistant || '', item.image)}
-          style={styles.responseContainerPressable}
+          style={sheet.responseContainerPressable}
+          disabled={!hasText && !hasImage}
         >
-          <View style={styles.responseContainer}>
-            {item.assistant?.trim() && (
-              <Markdown style={styles.markdownStyle}>
-                {item.assistant}
+          <View style={sheet.responseContainer}>
+            {hasText ? (
+              <Markdown style={markdown}>
+                {item.assistant || ''}
               </Markdown>
-            )}
-            {item.image && (
-              <Image
-                source={{ uri: item.image }}
-                style={styles.imageStyle}
-                resizeMode="contain"
-              />
-            )}
+            ) : null}
+            {hasImage ? (
+              <Pressable onPress={() => handleImageTap(item.image || '')}>
+                <Image
+                  source={{ uri: item.image }}
+                  style={{
+                    width: width * 0.5,
+                    height: width * 0.5,
+                    borderRadius: 10,
+                    marginTop: hasText ? 10 : 0,
+                    alignSelf: 'center'
+                  }}
+                  resizeMode="cover"
+                  onError={(e) => logImageError(e, item.image || 'unknown')}
+                  testID="response-image"
+                />
+              </Pressable>
+            ) : null}
+            {!hasText && !hasImage && preferenceStage === 'generating' ? (
+              <ActivityIndicator size="small" color={theme.tintColor} style={{ padding: 10 }} />
+            ) : null}
           </View>
         </Pressable>
       );
     }
-
+    
+    console.warn(`[renderItem] Item #${index} doesn't match any rendering condition:`, JSON.stringify(item));
     return null;
   }
 
+  async function handleGenerateImage() {
+    if (!input.trim() || loading) return;
+    Keyboard.dismiss();
+
+    // Store the current input and clear it
+    const currentInput = input;
+    setInput("");
+
+    // Add a user message with the input text
+    const newUserMessage = { 
+      user: currentInput,
+      _id: uuid() 
+    };
+    
+    const optimisticMessages = [
+      ...geminiResponse.messages,
+      newUserMessage
+    ];
+    
+    // Update UI with the user message
+    setGeminiResponse((c) => ({ 
+      index: c.index,
+      messages: JSON.parse(JSON.stringify(optimisticMessages)),
+    }));
+    
+    // Scroll to the new message
+    setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
+    
+    // Set loading state
+    setLoading(true);
+    
+    // Create a request body with explicit image generation tag
+    const enhancedInput = `${currentInput} \`\`[generate_image: ${currentInput}]\`\``;
+    const requestBody = {
+      prompt: enhancedInput,
+      messages: geminiResponse.messages,
+      is_potential_image_request: true,
+    };
+    
+    // Send the request
+    await streamGeminiResponse(requestBody, 'gemini');
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={sheet.container}>
       <KeyboardAvoidingView
         behavior="padding"
-        style={styles.container}
+        style={sheet.container}
         keyboardVerticalOffset={110}>
+        {preferenceStage === 'generating' && (
+            <View style={sheet.generatingContainer}>
+                <ActivityIndicator color={theme.tintColor} style={{ marginRight: 10 }} />
+                <Text style={sheet.generatingText}>Generating your character...</Text>
+            </View>
+        )}
         <ScrollView
           ref={scrollViewRef}
           keyboardShouldPersistTaps="handled"
-          style={styles.scrollContainer}>
-          {geminiResponse.messages.length === 0 && (
-            <View style={styles.greetingContainer}>
-              <Text style={styles.greeting}>Send a message to start chatting!</Text>
+          style={sheet.scrollContainer}
+          contentContainerStyle={{ paddingBottom: 10 }}
+          >
+          {geminiResponse.messages.length === 0 && preferenceStage === 'idle' && (
+            <View style={sheet.greetingContainer}>
+              <Text style={sheet.greeting}>Send a message to start chatting!</Text>
             </View>
           )}
           <FlatList
             data={geminiResponse.messages}
             renderItem={renderItem}
             scrollEnabled={false}
-            keyExtractor={(item, index) => `${geminiResponse.index}-${index}`}
+            keyExtractor={(item, index) => `msg-${geminiResponse.index}-${item._id || index}-${listUpdateToken}`}
+            extraData={{ 
+              messages: geminiResponse.messages, 
+              stage: preferenceStage, 
+              updateToken: listUpdateToken,
+              messageCount: geminiResponse.messages.length 
+            }}
           />
-          {loading && (
-            <View style={styles.loadingContainer}>
+          {loading && preferenceStage !== 'generating' && (
+            <View style={sheet.loadingContainer}>
               <ActivityIndicator color={theme.tintColor} />
             </View>
           )}
         </ScrollView>
-        <View style={styles.chatInputContainer}>
+        <View style={sheet.chatInputContainer}>
           <TextInput
             onChangeText={setInput}
-            style={styles.input}
-            placeholder="Send a message..."
+            style={sheet.input}
+            placeholder={
+              preferenceStage === 'generating' ? "Generating..." :
+              currentQuestionId ? "Your answer..." :
+              "Send a message..."
+            }
             placeholderTextColor={theme.placeholderTextColor}
             autoCorrect={true}
             value={input}
-            readOnly={loading}
+            editable={!loading && preferenceStage !== 'generating'}
+            onSubmitEditing={handleSendMessage}
+            returnKeyType="send"
           />
           <Pressable
-            onPress={chat}
-            disabled={loading || !input}
+            onPress={handleSendMessage}
+            disabled={loading || preferenceStage === 'generating' || !input.trim()}
             style={({ pressed }) => [
-              styles.buttonStyle,
-              (loading || !input) && styles.buttonDisabled,
+              sheet.buttonStyle,
+              (loading || preferenceStage === 'generating' || !input.trim()) && sheet.buttonDisabled,
+              pressed && sheet.buttonPressed
             ]}
           >
-            {loading ? (
+            {loading && preferenceStage !== 'generating' ? (
               <ActivityIndicator size="small" color={theme.tintTextColor} />
             ) : (
               <Ionicons
                 name="arrow-up"
                 size={20}
-                color={theme.tintTextColor}
+                color={ (loading || preferenceStage === 'generating' || !input.trim()) ? '#a0a0a0' : theme.tintTextColor}
               />
             )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Full Screen Image Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <Pressable 
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.9)',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+          onPress={() => setModalVisible(false)}
+        >
+          {selectedImage && (
+            <Image
+              source={{ uri: selectedImage }}
+              style={{
+                width: width * 0.9,
+                height: width * 0.9,
+                borderRadius: 5,
+              }}
+              resizeMode="contain"
+            />
+          )}
+          <Text style={{ 
+            color: 'white', 
+            position: 'absolute',
+            bottom: 40,
+            opacity: 0.8,
+            fontFamily: theme.regularFont 
+          }}>
+            Tap anywhere to close
+          </Text>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
-
-const getStyles = (theme: any) => {
-  const markdownStyle = {
-    body: {
-      color: theme.textColor,
-      fontSize: 16,
-      fontFamily: theme.regularFont,
-    },
-    heading1: {
-      color: theme.textColor,
-      fontFamily: theme.boldFont,
-      fontSize: 24,
-      marginTop: 10,
-      marginBottom: 5,
-    },
-    heading2: {
-      color: theme.textColor,
-      fontFamily: theme.semiBoldFont,
-      fontSize: 20,
-      marginTop: 8,
-      marginBottom: 4,
-    },
-    heading3: {
-      color: theme.textColor,
-      fontFamily: theme.semiBoldFont,
-      fontSize: 18,
-      marginTop: 6,
-      marginBottom: 3,
-    },
-    code_block: {
-      backgroundColor: theme.secondaryBackgroundColor,
-      color: theme.secondaryTextColor,
-      padding: 10,
-      borderRadius: 4,
-      borderColor: theme.borderColor,
-      borderWidth: 1,
-      fontFamily: "Courier New",
-      marginVertical: 5,
-    },
-    fence: {
-      backgroundColor: theme.secondaryBackgroundColor,
-      color: theme.secondaryTextColor,
-      padding: 10,
-      borderRadius: 4,
-      borderColor: theme.borderColor,
-      borderWidth: 1,
-      fontFamily: "Courier New",
-      marginVertical: 5,
-    },
-    link: {
-      color: theme.tintColor,
-      textDecorationLine: "underline" as const,
-    },
-    list_item: {
-      marginBottom: 5,
-    },
-    bullet_list: {
-      marginLeft: 10,
-    },
-    ordered_list: {
-      marginLeft: 10,
-    },
-    blockquote: {
-      backgroundColor: theme.borderColor,
-      borderLeftColor: theme.tintColor,
-      borderLeftWidth: 4,
-      padding: 10,
-      marginLeft: 5,
-      marginVertical: 5,
-    },
-    strong: {
-      fontFamily: theme.boldFont,
-    },
-    em: {
-      fontStyle: 'italic' as const,
-    }
-  };
-
-  const styles = StyleSheet.create({
-    userMessageOuterWrapper: {
-      marginTop: 10,
-    },
-    greetingContainer: {
-      justifyContent: "center",
-      alignItems: "center",
-      flexGrow: 1,
-      paddingBottom: 90,
-      paddingHorizontal: 20,
-    },
-    greeting: {
-      fontSize: 20,
-      textAlign: 'center',
-      fontFamily: theme.regularFont,
-      color: theme.textColor,
-      opacity: 0.6,
-    },
-    loadingContainer: {
-      marginVertical: 25,
-      justifyContent: "center",
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    responseContainerPressable: {
-      alignSelf: 'flex-start',
-      maxWidth: "85%",
-      marginLeft: 10,
-    },
-    responseContainer: {
-      padding: 15,
-      backgroundColor: theme.responseBackgroundColor,
-      borderBottomLeftRadius: 0,
-      borderTopLeftRadius: 10,
-      borderTopRightRadius: 10,
-      borderBottomRightRadius: 10,
-      marginTop: 10,
-      marginBottom: 10,
-    },
-    userMessageContainer: {
-      alignItems: 'flex-end',
-      marginRight: 15,
-      marginLeft: 24,
-    },
-    userMessageWrapper: {
-      maxWidth: '85%',
-      borderRadius: 8,
-      borderTopRightRadius: 0,
-      backgroundColor: theme.tintColor,
-    },
-    userMessageText: {
-      color: theme.tintTextColor,
-      fontFamily: theme.regularFont,
-      fontSize: 16,
-      paddingVertical: 5,
-      paddingHorizontal: 9,
-    },
-    container: {
-      flex: 1,
-      backgroundColor: theme.backgroundColor,
-    },
-    scrollContainer: {
-      flex: 1,
-      paddingTop: 10,
-    },
-    chatInputContainer: {
-      paddingTop: 5,
-      borderTopWidth: 1,
-      borderColor: theme.borderColor,
-      width: "100%",
-      flexDirection: "row",
-      alignItems: "center",
-      paddingBottom: 5,
-      paddingHorizontal: 5,
-      backgroundColor: theme.backgroundColor,
-    },
-    input: {
-      flex: 1,
-      borderWidth: 1,
-      borderRadius: 99,
-      color: theme.textColor,
-      marginHorizontal: 10,
-      paddingVertical: 10,
-      paddingHorizontal: 21,
-      borderColor: theme.borderColor,
-      fontFamily: theme.semiBoldFont,
-    },
-    buttonStyle: {
-      marginRight: 5,
-      padding: 8,
-      borderRadius: 99,
-      backgroundColor: theme.tintColor,
-      justifyContent: "center",
-      alignItems: "center",
-      width: 38,
-      height: 38,
-    },
-    buttonDisabled: {
-      backgroundColor: theme.disabledColor || "#cccccc",
-      opacity: 0.7,
-    },
-    imageStyle: {
-      width: width * 0.7,
-      height: width * 0.7,
-      marginTop: 10,
-      borderRadius: 8,
-      backgroundColor: theme.borderColor || "#e0e0e0",
-      alignSelf: 'center',
-    },
-  });
-
-  return { ...styles, markdownStyle };
-};

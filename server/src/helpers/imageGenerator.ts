@@ -16,37 +16,27 @@ export async function generateImage(
 ): Promise<string | null> {
 
     if (!process.env.FAL_KEY) {
-        console.error("🔴 [generateImage] FAL_KEY environment variable is not set!");
-        // Avoid throwing an error that might crash the server, return null instead.
+        console.error("FAL_KEY environment variable is not set!");
         return null;
     }
-
-    console.log(`⏳ [generateImage] Calling Fal.ai model: ${FLUX_PRO_MODEL_ID} for prompt: "${prompt.substring(0, 50)}..."`);
 
     try {
         const result = await fal.subscribe(FLUX_PRO_MODEL_ID, {
             input: {
                 prompt,
                 aspect_ratio: aspectRatio,
-                // Add any other default parameters for FLUX Pro if needed
             },
-            logs: process.env.NODE_ENV === 'development', // Enable logs only in development
-        }) as any; // Using 'any' for simplicity; define an interface for stricter typing
+            logs: process.env.NODE_ENV === 'development',
+        }) as any;
 
-        // Check if the result contains the expected 'images' array with a URL
         if (result?.data?.images?.[0]?.url) {
-            const imageUrl = result.data.images[0].url;
-            console.log(`✅ [generateImage] Success, Fal.ai returned image URL: ${imageUrl}`);
-            return imageUrl;
+            return result.data.images[0].url;
         } else {
-            console.error(
-                "🔴 [generateImage] Failed to generate image or invalid response structure from Fal.ai:",
-                JSON.stringify(result, null, 2)
-            );
+            console.error("Invalid response structure from Fal.ai");
             return null;
         }
     } catch (error) {
-        console.error("🔴 [generateImage] Error calling Fal.ai subscribe:", error);
+        console.error("Error during Fal.ai API call:", error);
         return null;
     }
 } 

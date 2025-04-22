@@ -18,11 +18,9 @@ export async function saveToBytescale(file: any) {
         mime: file.mimetype,
         originalFileName: file.originalname
     })
-    const { fileUrl, filePath } = upload
-    console.log(`File uploaded to: ${fileUrl}`)
-    console.log('filePath: ', filePath)
-    return fileUrl
+    return upload.fileUrl
   } catch (err) {
-    console.log('error uploading file: ', err)
+    console.log('Error uploading file:', err)
+    return null
   }
 }

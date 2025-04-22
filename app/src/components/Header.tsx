@@ -2,7 +2,6 @@ import {
   StyleSheet, View
 } from 'react-native'
 import { useContext } from 'react'
-import { Icon } from './Icon'
 import { ThemeContext } from '../../src/context'
 
 export function Header() {
@@ -11,7 +10,6 @@ export function Header() {
 
   return (
     <View style={styles.container}>
-      <Icon size={34} fill={theme.textColor} />
     </View>
   )
 }

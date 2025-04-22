@@ -1,11 +1,12 @@
 import { Request, Response } from "express"
 
-const endpoint = 'https://api.openai.com/v1/files'
-
 export async function uploadFile(req: Request, res: Response) {
   try {
     const { prompt, codeInterpreter }  = req.body
+    
+    res.status(501).json({ error: "Not implemented" })
   } catch (err) {
-    console.log('error in assistant chat: ', err)
+    console.error('Error in file upload:', err)
+    res.status(500).json({ error: "Server error" })
   }
 }

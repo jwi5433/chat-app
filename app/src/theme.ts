@@ -1,3 +1,5 @@
+import { ITheme } from '../types'; // Restored
+
 const colors = {
   white: '#fff',
   black: '#000',
@@ -19,7 +21,7 @@ const fonts = {
   ultraBlackFont: 'Geist-Ultrablack',
 }
 
-const lightTheme = {
+const lightTheme: ITheme = {
   ...fonts,
   name: 'Light',
   label: 'light',
@@ -37,7 +39,7 @@ const lightTheme = {
   tabBarInactiveTintColor: colors.gray,
 }
 
-const darkTheme = {
+const darkTheme: ITheme = {
   ...fonts,
   name: 'Dark',
   label: 'dark',
@@ -55,7 +57,7 @@ const darkTheme = {
   tabBarInactiveTintColor: colors.lightWhite,
 }
 
-const hackerNews = {
+const hackerNews: ITheme = {
   ...lightTheme,
   name: 'Hacker News',
   label: 'hackerNews',
@@ -64,7 +66,7 @@ const hackerNews = {
   responseBackgroundColor: '#dcdcdc',
 }
 
-const miami = {
+const miami: ITheme = {
   ...darkTheme,
   name: 'Miami',
   label: 'miami',
@@ -75,7 +77,7 @@ const miami = {
   responseBackgroundColor: '#333333',
 }
 
-const vercel = {
+const vercel: ITheme = {
   ...darkTheme,
   name: 'Vercel',
   label: 'vercel',

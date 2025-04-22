@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { ActionSheetProvider } from '@expo/react-native-action-sheet'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { StyleSheet, LogBox } from 'react-native'
+import { ITheme } from './types'
 
 LogBox.ignoreLogs([
   'Key "cancelled" in the image picker result is deprecated and will be removed in SDK 48, use "canceled" instead',
@@ -67,12 +68,20 @@ export default function App() {
   )
 }
 
-function getTheme(theme: any) {
-  let current
-  Object.keys(themes).forEach(_theme => {
-    if (_theme.includes(theme)) {
-      current = themes[_theme]
+function getTheme(themeName: string): ITheme {
+  let currentTheme = themes.lightTheme; // Default to lightTheme
+  // Find theme by label, revert to original logic if problematic
+  Object.keys(themes).forEach(_themeKey => {
+    if (themes[_themeKey].label === themeName) { // Assuming lookup by label was intended
+      currentTheme = themes[_themeKey];
     }
-  })
-  return current
+  });
+
+  // Add a check to ensure a theme was found, otherwise return default
+  if (!currentTheme && themeName !== themes.lightTheme.label) {
+      console.warn(`[getTheme] Theme name "${themeName}" did not match any theme label, defaulting to light theme.`);
+      return themes.lightTheme;
+  }
+
+  return currentTheme || themes.lightTheme; // Ensure a valid theme is always returned
 }

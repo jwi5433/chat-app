@@ -34,12 +34,8 @@ export const callImageGenerationEndpoint = async (
     }
 ): Promise<{ image: string }> => {
   try {
-    console.log(`[callImageGenerationEndpoint] Calling backend for model: ${payload.model}`);
-
     const endpointPath = '/images/fal'; 
     const fullUrl = `${DOMAIN}${endpointPath}`;
-    console.log(`[callImageGenerationEndpoint] Fetching: ${fullUrl}`);
-    console.log(`[callImageGenerationEndpoint] Payload:`, payload);
 
     const response = await fetch(fullUrl, {
       method: "POST",
@@ -59,22 +55,20 @@ export const callImageGenerationEndpoint = async (
       } catch (e) {
          errorData.error += `, Response: ${responseText}`;
       }
-      console.error("[callImageGenerationEndpoint] Error response from server:", errorData);
+      console.error("Error response from server:", errorData);
       throw new Error(errorData.error);
     }
 
     const data = JSON.parse(responseText);
 
     if (!data || typeof data.image !== 'string' || !data.image.startsWith('http')) {
-        console.error("[callImageGenerationEndpoint] Invalid response structure:", data);
+        console.error("Invalid response structure:", data);
         throw new Error("API returned an invalid image URL format.");
     }
 
-    console.log(`[callImageGenerationEndpoint] Success, received image URL: ${data.image}`);
     return data;
-
   } catch (error) {
-    console.error('[callImageGenerationEndpoint] Error during image generation call:', error);
+    console.error('Error during image generation call:', error);
     throw error;
   }
 };
