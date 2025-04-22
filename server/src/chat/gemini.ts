@@ -219,7 +219,7 @@ export async function gemini(req: Request, res: Response) {
              return; 
         }
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro-exp-03-25", systemInstruction }); // Use 1.5 flash maybe?
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro-preview-03-25", systemInstruction });
         const safetySettings = [
              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -279,7 +279,13 @@ export async function gemini(req: Request, res: Response) {
             text: introImageErrorMsg || introStreamErrorMsg ? `${introText}\n\n${introImageErrorMsg || introStreamErrorMsg}`.trim() : introText, // Append error to text
             image: null // Always send null for image in this update
         };
-        console.log("[Final Intro Update] Sending final payload:", finalIntroPayload);
+        
+        // Add validation check for text content
+        if (!finalIntroPayload.text || finalIntroPayload.text.length === 0) {
+            console.error("[Final Intro Update] ERROR: Trying to send empty text content!");
+            finalIntroPayload.text = "Hello! I'm here to chat with you. What would you like to talk about?";
+        }
+        
         res.write(`data: ${JSON.stringify(finalIntroPayload)}\r\n\r\n`);
         // --- END ADDED ---
 
@@ -526,7 +532,20 @@ export async function gemini(req: Request, res: Response) {
                  console.warn("⚠️ Appearance description missing, cannot generate image accurately.");
                  imageGenErrorMsg = "(Sorry, I seem to have forgotten what I look like! 😅)";
              } else {
-                const finalImagePrompt = `attractive, beautiful, photorealistic, ${appearanceDescription}, ${imageGenPromptFromAI}`;
+                // Check if this is the first image being generated in the conversation
+                const isFirstImage = !messages.some(msg => msg.image);
+                
+                let finalImagePrompt = "";
+                if (isFirstImage) {
+                  // For first images, generate a close-up headshot for better profile picture
+                  finalImagePrompt = `close-up headshot portrait, face clearly visible, shoulders up, looking at camera, attractive, beautiful, photorealistic, ${appearanceDescription}, ${imageGenPromptFromAI}`;
+                  console.log("Generating first image (profile picture)");
+                } else {
+                  // For subsequent images, use the regular prompt formatting
+                  finalImagePrompt = `attractive, beautiful, photorealistic, ${appearanceDescription}, ${imageGenPromptFromAI}`;
+                  console.log("Generating additional image");
+                }
+                
                 console.log(`⏳ Generating image for prompt: "${finalImagePrompt}"...`);
                 try {
                   finalImageUrl = await generateImage(finalImagePrompt, "1:1"); // Store result
@@ -548,7 +567,13 @@ export async function gemini(req: Request, res: Response) {
             text: imageGenErrorMsg || chatStreamErrorMsg ? `${accumulatedResponse}\n\n${imageGenErrorMsg || chatStreamErrorMsg}`.trim() : accumulatedResponse, // Append image generation OR stream error to text
             image: null // Always send null for image in this update
         };
-        console.log("[Final Update] Sending final payload:", finalUpdatePayload);
+        
+        // Add validation check for text content
+        if (!finalUpdatePayload.text || finalUpdatePayload.text.length === 0) {
+            console.error("[Final Update] ERROR: Trying to send empty text content!");
+            finalUpdatePayload.text = "I'm here to chat with you. What would you like to talk about?";
+        }
+        
         res.write(`data: ${JSON.stringify(finalUpdatePayload)}\r\n\r\n`);
         // --- END ADDED ---
 
@@ -606,6 +631,6 @@ export async function gemini(req: Request, res: Response) {
     }
   }
 }
-
 // Remove the old streamToStdout function as its logic is integrated above
 // export async function streamToStdout(stream: any, res: Response) { ... }
+

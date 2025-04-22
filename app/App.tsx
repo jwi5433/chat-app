@@ -1,4 +1,6 @@
 import 'react-native-gesture-handler'
+// Remove the globals.css import as it's not needed for React Native
+// import './src/globals.css'
 import { useState, useEffect } from 'react'
 import { NavigationContainer } from '@react-navigation/native'
 import { Main } from './src/main'

@@ -2,12 +2,13 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableHighlight,
+  Pressable,
   ScrollView,
 } from 'react-native'
 import { useContext } from 'react'
 import { ThemeContext } from '../context'
 import * as themes from '../theme'
+import { CustomHeader } from '../components/CustomHeader'
 
 const _themes = Object.values(themes).map(v => ({
   name: v.name,
@@ -20,45 +21,45 @@ export function Settings() {
   const styles = getStyles(theme)
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-    >
-      <View
-        style={styles.titleContainer}
+    <View style={styles.container}>
+      <CustomHeader showBackButton />
+      <ScrollView
+        contentContainerStyle={styles.contentContainer}
       >
-        <Text
-            style={styles.mainText}
-        >Theme</Text>
-      </View>
-      {
-        _themes.map((value, index) => (
-          <TouchableHighlight
-            key={index}
-            underlayColor='transparent'
-            onPress={() => {
-              setTheme(value.label)
-            }}
-          >
-            <View
-              style={[
+        <View
+          style={styles.titleContainer}
+        >
+          <Text
+              style={styles.mainText}
+          >Theme</Text>
+        </View>
+        {
+          _themes.map((value, index) => (
+            <Pressable
+              key={index}
+              onPress={() => {
+                setTheme(value.label)
+              }}
+              style={({ pressed }) => [
                 styles.choiceButton,
-                themeName === value.label && styles.selectedChoiceButton
+                themeName === value.label && styles.selectedChoiceButton,
               ]}
             >
-              <Text
-                style={[
-                  styles.choiceText,
-                  themeName === value.label && styles.selectedChoiceText
-                ]}
-              >
-                {value.name}
-              </Text>
-            </View>
-          </TouchableHighlight>
-        ))
-      }
-    </ScrollView>
+              <View>
+                <Text
+                  style={[
+                    styles.choiceText,
+                    themeName === value.label && styles.selectedChoiceText
+                  ]}
+                >
+                  {value.name}
+                </Text>
+              </View>
+            </Pressable>
+          ))
+        }
+      </ScrollView>
+    </View>
   )
 }
 

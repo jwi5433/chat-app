@@ -16,18 +16,20 @@ import {
   ViewStyle,
   TextStyle,
   ImageStyle,
-  DimensionValue
+  DimensionValue,
+  Platform
 } from "react-native";
 import "react-native-get-random-values";
 import { useContext, useState, useRef, useEffect, useMemo } from "react";
 import { ThemeContext } from "../context";
-import { getEventSource } from "../utils";
+import { getEventSource, callImageGenerationEndpoint } from "../utils";
 import { v4 as uuid } from "uuid";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Clipboard from "expo-clipboard";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import Markdown from "@ronradtke/react-native-markdown-display";
 import { ITheme } from '../../types';
+import FlirtChat, { MessageType as FlirtMessageType } from '../components/FlirtChat';
 
 type Message = {
   user?: string;
@@ -63,6 +65,7 @@ interface ChatStyles {
   loadingContainer: ViewStyle;
   generatingContainer: ViewStyle;
   generatingText: TextStyle;
+  loading: ViewStyle;
 }
 
 // Define return type for getStyles function
@@ -230,6 +233,11 @@ const getStyles = (theme: ITheme): StylesResult => {
          fontFamily: theme.regularFont,
          fontSize: 14,
        },
+      loading: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+      },
     });
     console.log("[getStyles] StyleSheet.create (full) succeeded.");
     return { sheet: styles, markdown: markdownStyle };
@@ -250,7 +258,7 @@ const defaultImageStyle: ImageStyle = {
 
 // --- ADDED: Debug function ---
 const logImageError = (error: any, imageUrl: string) => {
-  console.error(`Image loading error for ${imageUrl}:`, error.nativeEvent);
+  console.error(`Error loading image from ${imageUrl}:`, error);
 };
 
 export function Chat() {
@@ -259,6 +267,12 @@ export function Chat() {
   const [input, setInput] = useState<string>("");
   const scrollViewRef = useRef<ScrollView | null>(null);
   const { showActionSheetWithOptions } = useActionSheet();
+
+  // State for AI profile
+  const [aiProfile, setAiProfile] = useState({
+    name: 'AI Chat',
+    avatar: 'https://ui-avatars.com/api/?name=AI&background=d53f8c&color=fff&size=200'
+  });
 
   // New state for sequential preference flow
   const [preferenceStage, setPreferenceStage] = useState<PreferenceStage>('idle');
@@ -270,6 +284,9 @@ export function Chat() {
 
   // --- ADDED: State to help force FlatList updates ---
   const [listUpdateToken, setListUpdateToken] = useState(0);
+
+  // Track if we're seeing the first generation
+  const [isFirstGeneration, setIsFirstGeneration] = useState(true);
 
   const [geminiResponse, setGeminiResponse] = useState<{
     messages: Message[];
@@ -322,6 +339,70 @@ export function Chat() {
     );
   }
   // --- End Style Check ---
+
+  // Convert messages to the format required by FlirtChat
+  const flirtChatMessages: FlirtMessageType[] = geminiResponse.messages.map((msg, idx) => {
+    let content = '';
+    let image: string | undefined = undefined;
+    
+    if (msg.user) {
+      content = msg.user;
+    } else if (msg.assistant) {
+      content = msg.assistant;
+    }
+    
+    if (msg.image) {
+      image = msg.image;
+    }
+    
+    return {
+      id: msg._id || `msg-${idx}`,
+      sender: msg.user ? 'user' : 'assistant',
+      content: content,
+      image: image,
+      timestamp: new Date().toISOString()
+    };
+  });
+  
+  // Function to handle sending messages from FlirtChat
+  const handleSendFromFlirtChat = (message: string) => {
+    setInput(''); // Clear input since FlirtChat manages its own
+    // Use the existing handleSendMessage logic but with the message parameter
+    const messageToSend = message.trim();
+    if (!messageToSend || loading) return;
+    
+    // Create a new message object
+    const newMessage = { user: messageToSend, _id: uuid() };
+    
+    // Add new message to state
+    const updatedMessages = [...geminiResponse.messages, newMessage];
+    
+    // Update state with new message
+    setGeminiResponse(prev => ({
+      ...prev,
+      messages: updatedMessages
+    }));
+    
+    // Call the appropriate endpoint based on current state
+    if (currentQuestionId) {
+      // Handle preference answer (using existing function logic)
+      setLoading(true);
+      const requestBody = {
+        messages: updatedMessages,
+        answer: messageToSend,
+        questionId: currentQuestionId
+      };
+      streamGeminiResponse(requestBody, 'gemini');
+    } else {
+      // Handle regular chat (using existing function logic)
+      setLoading(true);
+      const requestBody = {
+        prompt: messageToSend,
+        messages: geminiResponse.messages,
+      };
+      streamGeminiResponse(requestBody, 'gemini');
+    }
+  };
 
   async function handleSendMessage() {
     if (!input.trim() || loading) return;
@@ -469,7 +550,8 @@ export function Chat() {
                  return prevStage; 
              });
  
-             localResponseAccumulator = "";
+             // Don't reset the localResponseAccumulator here
+             // localResponseAccumulator = "";
              currentAssistantMessageId = null;
              es.close();
              setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
@@ -514,14 +596,15 @@ export function Chat() {
                 setTimeout(() => { scrollViewRef.current?.scrollToEnd({ animated: true }); }, 50);
              } else if (parsedData.action === "generating_flirt") {
                  console.log("[SSE] Received generating_flirt action.");
-                 const newMessageId = uuid();
+                 // Remove creating empty message placeholder
+                 // const newMessageId = uuid();
                  
-                 // Don't skip adding the generating message - it's needed for UI feedback
-                 setGeminiResponse(prevState => ({
-                    ...prevState,
-                    messages: [...prevState.messages, { assistant: "", _id: newMessageId }] 
-                 }));
-                 currentAssistantMessageId = newMessageId;
+                 // Don't create an empty placeholder message - the FlirtChat typing indicator handles this
+                 // setGeminiResponse(prevState => ({
+                 //    ...prevState,
+                 //    messages: [...prevState.messages, { assistant: "", _id: newMessageId }] 
+                 // }));
+                 // currentAssistantMessageId = newMessageId;
                  
                  setPreferenceStage('generating');
              } else if (parsedData.error) {
@@ -545,7 +628,85 @@ export function Chat() {
                  
                  // Always log the final text for debugging
                  console.log("[SSE Final Update] Final text:", finalText.substring(0, 100) + "...");
-
+                 
+                 // Set the localResponseAccumulator to the finalText
+                 localResponseAccumulator = finalText;
+                 
+                 // Check if this is empty
+                 if (!localResponseAccumulator.trim()) {
+                     console.warn("[SSE Final Update] Received empty text content, setting placeholder");
+                     localResponseAccumulator = "I'm here! What would you like to talk about?";
+                 }
+                 
+                 // Check if this is the first message and try to extract name
+                 if (isFirstGeneration && finalText.length > 0) {
+                   console.log("[SSE Final] Checking for AI name in complete message");
+                   // Look for common name introduction patterns
+                   const namePatterns = [
+                     /I\s*(?:'|a)m\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /[Mm]y name is\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /[Cc]all me\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /I go by\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /name(?:'|)s\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /I'm\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /known as\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /This is\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /you can call me\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /It'?s\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                     /Hey.*?[,!]?\s+(?:I'?m|I am|This is|It'?s)\s+(.*?)(?:,|\.|\!|\s+and|\n)/i
+                   ];
+                   
+                   let foundName = false;
+                   for (const pattern of namePatterns) {
+                     const match = finalText.match(pattern);
+                     if (match && match[1]) {
+                       // Extract name and clean it up
+                       let aiName = match[1].trim();
+                       
+                       // Skip common phrases that aren't actually names
+                       const nonNamePhrases = ['here', 'your', 'the', 'a', 'an', 'this', 'that', 'just', 'so', 'going to', 'happy', 'excited', 'glad', 'pleased'];
+                       if (nonNamePhrases.some(phrase => aiName.toLowerCase().startsWith(phrase))) {
+                         continue;
+                       }
+                       
+                       // If name is too long, take just the first word or limit to 15 chars
+                       if (aiName.length > 15) {
+                         aiName = aiName.split(/\s+/)[0];
+                       }
+                       
+                       // Update AI name if found
+                       if (aiName && aiName.length > 1) {
+                         console.log("[SSE Final] Extracted AI name from intro:", aiName);
+                         setAiProfile(prev => ({
+                           ...prev,
+                           name: aiName
+                         }));
+                         foundName = true;
+                         break; // Stop after finding first valid name
+                       }
+                     }
+                   }
+                   
+                   // If no name found using patterns, try to find the first capitalized word that could be a name
+                   if (!foundName) {
+                     const words = finalText.split(/\s+/);
+                     for (const word of words) {
+                       // Find a word that starts with capital letter, has 3+ chars, and isn't at beginning of sentence
+                       if (word.length >= 3 && /^[A-Z][a-z]+$/.test(word) && 
+                           !['I', 'My', 'Hi', 'Hello', 'Hey', 'The', 'This', 'That'].includes(word)) {
+                         console.log("[SSE Final] Extracted capitalized name from intro:", word);
+                         setAiProfile(prev => ({
+                           ...prev,
+                           name: word
+                         }));
+                         break;
+                       }
+                     }
+                   }
+                   
+                   setIsFirstGeneration(false); // Mark first generation as complete
+                 }
+                 
                  // Pattern to look for empty backticks that might indicate an attempted image 
                  // The model sometimes tries to use `` or ``` as image placeholders
                  const containsEmptyBackticks = /(?:``|```)\s*(?:``|```)/g.test(finalText);
@@ -592,12 +753,16 @@ export function Chat() {
                      
                      if (isRegularChatMessage) {
                          // For chat responses to user messages, add a new assistant message
-                         const newAssistantMessage = {
-                             assistant: localResponseAccumulator,
-                             _id: uuid()
-                         };
-                         messagesCopy.push(newAssistantMessage);
-                         console.log("[SSE Final Update] Added new assistant response message");
+                         // Only add a message if we have content
+                         if (localResponseAccumulator && localResponseAccumulator.trim().length > 0) {
+                             const newAssistantMessage = {
+                                 assistant: localResponseAccumulator,
+                                 _id: uuid()
+                             };
+                             messagesCopy.push(newAssistantMessage);
+                         } else {
+                             console.warn("[SSE Final Update] Skipped adding empty message");
+                         }
                      } else if (messagesCopy.length > 0) {
                          // For preference flow or intro, update the last message
                          const lastMessageIndex = messagesCopy.length - 1;
@@ -607,7 +772,7 @@ export function Chat() {
                              messagesCopy[lastMessageIndex] = {
                                 ...messagesCopy[lastMessageIndex],
                                 assistant: localResponseAccumulator,
-                                image: null // Ensure image is null or removed
+                                image: messagesCopy[lastMessageIndex].image // Preserve existing image if any
                              };
                              console.log("[SSE Final Update] Updated last assistant message TEXT");
                          } else {
@@ -619,18 +784,38 @@ export function Chat() {
                              console.log("[SSE Final Update] Last message not from assistant, added new one");
                          }
                      } else if (isFirstIntro) {
-                         console.log("[SSE Final Update] Adding first intro message");
-                         messagesCopy.push({ 
-                             assistant: localResponseAccumulator,
-                             _id: uuid()
-                         });
+                         // Make sure we have content before adding the message
+                         if (localResponseAccumulator && localResponseAccumulator.trim().length > 0) {
+                             messagesCopy.push({ 
+                                 assistant: localResponseAccumulator,
+                                 _id: uuid()
+                             });
+                         } else {
+                             // Use fallback for empty intro text
+                             messagesCopy.push({ 
+                                 assistant: "Hello! I'm here to chat with you. What would you like to talk about?",
+                                 _id: uuid()
+                             });
+                         }
                      } else {
                          console.warn("[SSE Final Update] Messages array was empty, adding new text message.");
-                         messagesCopy.push({ assistant: localResponseAccumulator });
+                         messagesCopy.push({ 
+                            assistant: localResponseAccumulator,
+                            _id: uuid()
+                         });
                      }
                      
                      console.log("[SSE Final Update] Messages count after update:", messagesCopy.length);
-                     return { ...prevState, messages: messagesCopy };
+                     console.log("[SSE Final Update] Message content:", localResponseAccumulator.substring(0, 50));
+                     
+                     // Create a new reference to ensure React detects the change
+                     const freshMessages = [...messagesCopy];
+                     
+                     return { 
+                         ...prevState, 
+                         messages: freshMessages,
+                         index: prevState.index 
+                     };
                  });
 
                  // Increment update token to ensure re-render after text update
@@ -644,6 +829,16 @@ export function Chat() {
                  const imageUrl = parsedData.image;
                  const newImageMsg = { image: imageUrl, _id: uuid() };
 
+                 // Check if this is the first image received and use it as profile pic
+                 const isFirstImage = !geminiResponse.messages.some(msg => msg.image);
+                 if (isFirstImage) {
+                   console.log("[SSE] Setting first image as AI profile picture:", imageUrl);
+                   setAiProfile(prev => ({
+                     ...prev,
+                     avatar: imageUrl
+                   }));
+                 }
+                 
                  setGeminiResponse(prevState => ({
                      ...prevState,
                      messages: [...prevState.messages, newImageMsg]
@@ -661,6 +856,75 @@ export function Chat() {
               setPreferenceStage('chatting'); 
 
               localResponseAccumulator += parsedData;
+              
+              // If this is the first complete response and contains an introduction, try to extract the AI's name
+              if (isFirstGeneration && localResponseAccumulator.length > 30) {
+                // Look for common name introduction patterns
+                const namePatterns = [
+                  /I\s*(?:'|a)m\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /[Mm]y name is\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /[Cc]all me\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /I go by\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /name(?:'|)s\s*(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /I'm\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /known as\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /This is\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /you can call me\s+(.*?)(?:,|\.|!|\s+and|\n)/i,
+                  /It'?s\s+(.*?)(?:,|\.|!|\s+and|\n)/i, // Add pattern to catch "It's Lily!"
+                  /Hey.*?[,!]?\s+(?:I'?m|I am|This is|It'?s)\s+(.*?)(?:,|\.|\!|\s+and|\n)/i // Catch complex greetings
+                ];
+                
+                let foundName = false;
+                for (const pattern of namePatterns) {
+                  const match = localResponseAccumulator.match(pattern);
+                  if (match && match[1]) {
+                    // Extract name and clean it up
+                    let aiName = match[1].trim();
+                    
+                    // Skip common phrases that aren't actually names
+                    const nonNamePhrases = ['here', 'your', 'the', 'a', 'an', 'this', 'that', 'just', 'so', 'going to', 'happy', 'excited', 'glad', 'pleased'];
+                    if (nonNamePhrases.some(phrase => aiName.toLowerCase().startsWith(phrase))) {
+                      continue;
+                    }
+                    
+                    // If name is too long, take just the first word or limit to 15 chars
+                    if (aiName.length > 15) {
+                      aiName = aiName.split(/\s+/)[0];
+                    }
+                    
+                    // Update AI name if found
+                    if (aiName && aiName.length > 1) {
+                      console.log("[SSE] Extracted AI name from intro:", aiName);
+                      setAiProfile(prev => ({
+                        ...prev,
+                        name: aiName
+                      }));
+                      foundName = true;
+                      break; // Stop after finding first valid name
+                    }
+                  }
+                }
+                
+                // If no name found using patterns, try to find the first capitalized word that could be a name
+                if (!foundName) {
+                  const words = localResponseAccumulator.split(/\s+/);
+                  for (const word of words) {
+                    // Find a word that starts with capital letter, has 3+ chars, and isn't at beginning of sentence
+                    if (word.length >= 3 && /^[A-Z][a-z]+$/.test(word) && 
+                        !['I', 'My', 'Hi', 'Hello', 'Hey', 'The', 'This', 'That'].includes(word)) {
+                      console.log("[SSE] Extracted capitalized name from intro:", word);
+                      setAiProfile(prev => ({
+                        ...prev,
+                        name: word
+                      }));
+                      break;
+                    }
+                  }
+                }
+                
+                setIsFirstGeneration(false); // Mark first generation as complete
+              }
+              
               if (localResponseAccumulator.length < 850) {
                  scrollViewRef.current?.scrollToEnd({ animated: false });
               }
@@ -970,80 +1234,16 @@ ${errorMsg}`;
   return (
     <View style={sheet.container}>
       <KeyboardAvoidingView
-        behavior="padding"
-        style={sheet.container}
-        keyboardVerticalOffset={110}>
-        {preferenceStage === 'generating' && (
-            <View style={sheet.generatingContainer}>
-                <ActivityIndicator color={theme.tintColor} style={{ marginRight: 10 }} />
-                <Text style={sheet.generatingText}>Generating your character...</Text>
-            </View>
-        )}
-        <ScrollView
-          ref={scrollViewRef}
-          keyboardShouldPersistTaps="handled"
-          style={sheet.scrollContainer}
-          contentContainerStyle={{ paddingBottom: 10 }}
-          >
-          {geminiResponse.messages.length === 0 && preferenceStage === 'idle' && (
-            <View style={sheet.greetingContainer}>
-              <Text style={sheet.greeting}>Send a message to start chatting!</Text>
-            </View>
-          )}
-          <FlatList
-            data={geminiResponse.messages}
-            renderItem={renderItem}
-            scrollEnabled={false}
-            keyExtractor={(item, index) => `msg-${geminiResponse.index}-${item._id || index}-${listUpdateToken}`}
-            extraData={{ 
-              messages: geminiResponse.messages, 
-              stage: preferenceStage, 
-              updateToken: listUpdateToken,
-              messageCount: geminiResponse.messages.length 
-            }}
-          />
-          {loading && preferenceStage !== 'generating' && (
-            <View style={sheet.loadingContainer}>
-              <ActivityIndicator color={theme.tintColor} />
-            </View>
-          )}
-        </ScrollView>
-        <View style={sheet.chatInputContainer}>
-          <TextInput
-            onChangeText={setInput}
-            style={sheet.input}
-            placeholder={
-              preferenceStage === 'generating' ? "Generating..." :
-              currentQuestionId ? "Your answer..." :
-              "Send a message..."
-            }
-            placeholderTextColor={theme.placeholderTextColor}
-            autoCorrect={true}
-            value={input}
-            editable={!loading && preferenceStage !== 'generating'}
-            onSubmitEditing={handleSendMessage}
-            returnKeyType="send"
-          />
-          <Pressable
-            onPress={handleSendMessage}
-            disabled={loading || preferenceStage === 'generating' || !input.trim()}
-            style={({ pressed }) => [
-              sheet.buttonStyle,
-              (loading || preferenceStage === 'generating' || !input.trim()) && sheet.buttonDisabled,
-              pressed && sheet.buttonPressed
-            ]}
-          >
-            {loading && preferenceStage !== 'generating' ? (
-              <ActivityIndicator size="small" color={theme.tintTextColor} />
-            ) : (
-              <Ionicons
-                name="arrow-up"
-                size={20}
-                color={ (loading || preferenceStage === 'generating' || !input.trim()) ? '#a0a0a0' : theme.tintTextColor}
-              />
-            )}
-          </Pressable>
-        </View>
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <FlirtChat
+          messages={flirtChatMessages}
+          onSendMessage={handleSendFromFlirtChat}
+          aiProfile={aiProfile}
+          isGenerating={loading}
+          isFirstMessage={geminiResponse.messages.length === 0}
+        />
       </KeyboardAvoidingView>
 
       {/* Full Screen Image Modal */}
