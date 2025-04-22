@@ -31,6 +31,14 @@ app.use('/chat', chatRouter)
 app.use('/images', imagesRouter)
 app.use('/files', fileRouter)
 
-app.listen(3050, () => {
-  console.log('Server started on port 3050')
-})
+const PORT = process.env.PORT || 3050;
+
+// Conditionally start the server only when NOT running on Vercel
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server started locally on port ${PORT}`);
+  });
+}
+
+// Export the app instance for Vercel
+export default app;
