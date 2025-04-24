@@ -157,16 +157,13 @@ export default function FlirtChat({
                     {message.content}
                   </Text>
                 ) : message.sender === 'assistant' && !message.image ? (
-                  // Add placeholder text for empty assistant messages with no image
-                  <Text style={styles.botText}>
-                    {"..."}
-                  </Text>
+                  <Text style={styles.botText}>...</Text>
                 ) : null}
                 
                 {message.image && (
                   <Pressable 
-                    onPress={() => handleImageTap(message.image || '')}
                     style={styles.messageImageContainer}
+                    onPress={() => handleImageTap(message.image || '')}
                   >
                     <Image
                       source={{ uri: message.image }}
@@ -261,7 +258,7 @@ export default function FlirtChat({
         onRequestClose={() => setModalVisible(false)}
       >
         <Pressable 
-          style={styles.modalContainer}
+          style={[styles.modalContainer, { pointerEvents: 'auto' }]}
           onPress={() => setModalVisible(false)}
         >
           {selectedImage && (

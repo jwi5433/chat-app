@@ -9,6 +9,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { ThemeContext } from '../context';
 import FeatherIcon from '@expo/vector-icons/Feather';
+import { useAuth } from '@clerk/clerk-expo';
 
 interface CustomHeaderProps {
   showBackButton?: boolean;
@@ -16,11 +17,26 @@ interface CustomHeaderProps {
 
 export function CustomHeader({ showBackButton }: CustomHeaderProps) {
   const { theme } = useContext(ThemeContext);
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
+  let isSignedIn = false;
+  
+  try {
+    // Wrap Clerk's useAuth in a try/catch to prevent errors if ClerkProvider is not available
+    const authInfo = useAuth();
+    isSignedIn = authInfo?.isSignedIn || false;
+  } catch (error) {
+    // If ClerkProvider is not available, isSignedIn will remain false
+    console.log('Auth context not available');
+  }
+  
   const styles = getStyles(theme);
 
   const handleBackPress = () => {
     navigation.goBack();
+  };
+  
+  const handleProfilePress = () => {
+    navigation.navigate('UserProfile');
   };
 
   // Avatar URL for the AI
@@ -46,8 +62,14 @@ export function CustomHeader({ showBackButton }: CustomHeaderProps) {
         <Text style={styles.title}>AI Chat</Text>
       </View>
       
-      {/* Right side - empty for balance */}
-      <View style={styles.rightContainer}></View>
+      {/* Right side - profile button or empty */}
+      <View style={styles.rightContainer}>
+        {isSignedIn && (
+          <TouchableOpacity onPress={handleProfilePress} style={styles.iconButton}>
+            <FeatherIcon name="user" size={22} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -73,6 +95,7 @@ function getStyles(theme: any) {
     },
     rightContainer: {
       width: 40,
+      alignItems: 'flex-end',
     },
     title: {
       fontSize: 18,

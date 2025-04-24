@@ -1,2 +1,5 @@
 export { Chat } from './chat'
 export { Settings } from './settings'
+export { SignIn } from './SignIn'
+export { SignUp } from './SignUp'
+export { UserProfile } from './UserProfile'

@@ -9,6 +9,8 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@clerk/clerk-expo": "^2.10.0",
+    "@clerk/shared": "^3.7.4",
     "@expo/metro-runtime": "~3.2.3",
     "@expo/react-native-action-sheet": "^4.0.1",
     "@gorhom/bottom-sheet": "^4",
@@ -29,8 +31,10 @@
     "expo-clipboard": "~6.0.3",
     "expo-file-system": "~17.0.1",
     "expo-image-picker": "~15.0.7",
+    "expo-secure-store": "^14.0.1",
     "expo-splash-screen": "~0.27.5",
     "expo-status-bar": "~1.12.1",
+    "expo-web-browser": "^14.0.2",
     "lucide-react": "^0.503.0",
     "lucide-react-native": "^0.503.0",
     "postcss": "^8.5.3",
